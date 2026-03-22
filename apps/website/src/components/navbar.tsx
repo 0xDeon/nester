@@ -15,7 +15,7 @@ const navLinks = [
     { name: "Resources", href: "#resources" },
     { name: "Developers", href: "#developers" },
     { name: "About", href: "#about" },
-    {name: "Docs", href: "/docs" },
+    { name: "Docs", href: "/docs", newTab: true },
 ]
 
 export function Navbar() {
@@ -48,6 +48,7 @@ export function Navbar() {
                             <Link
                                 key={link.name}
                                 href={link.href}
+                                {...("newTab" in link && link.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                                 className="text-[15px] font-medium text-foreground/70 hover:text-foreground transition-colors relative group py-2"
                             >
                                 {link.name}
@@ -77,6 +78,7 @@ export function Navbar() {
                                     <Link
                                         key={link.name}
                                         href={link.href}
+                                        {...("newTab" in link && link.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                                         className="text-lg font-medium text-foreground hover:text-primary transition-colors flex items-center justify-between group"
                                     >
                                         {link.name}
