@@ -66,7 +66,11 @@ export default function HistoryPage() {
             
             let matchesDate = true;
             if (startDate) matchesDate = matchesDate && new Date(tx.timestamp) >= new Date(startDate);
-            if (endDate) matchesDate = matchesDate && new Date(tx.timestamp) <= new Date(endDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                matchesDate = matchesDate && new Date(tx.timestamp) <= end;
+            }
             
             return matchesType && matchesVault && matchesSearch && matchesDate;
         });
@@ -87,7 +91,9 @@ export default function HistoryPage() {
         ]);
         
         const csvContent = "data:text/csv;charset=utf-8," + 
-            [headers, ...rows].map(e => e.join(",")).join("\n");
+            [headers, ...rows].map(row => 
+                row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(",")
+            ).join("\n");
         
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
@@ -375,9 +381,17 @@ export default function HistoryPage() {
                                     </button>
                                     
                                     <div className="flex items-center gap-1.5">
-                                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                            // Handle pagination logic if many pages, but simple for now
-                                            const page = i + 1;
+                                        {Array.from({ 
+                                            length: Math.min(totalPages, Math.max(1, Math.min(totalPages, currentPage + 2)) - Math.max(1, currentPage - 2) + 1)
+                                        }, (_, i) => {
+                                            const startPage = Math.max(1, currentPage - 2);
+                                            const endPage = Math.min(totalPages, startPage + 4);
+                                            const actualStartPage = endPage - startPage < 4 ? Math.max(1, endPage - 4) : startPage;
+                                            
+                                            // More robust sliding window calculation
+                                            const page = actualStartPage + i;
+                                            if (page > totalPages) return null;
+                                            
                                             return (
                                                 <button 
                                                     key={page}
@@ -393,7 +407,7 @@ export default function HistoryPage() {
                                                 </button>
                                             );
                                         })}
-                                        {totalPages > 5 && <span className="mx-1 text-muted-foreground">...</span>}
+                                        {totalPages > 5 && currentPage < totalPages - 2 && <span className="mx-1 text-muted-foreground">...</span>}
                                     </div>
 
                                     <button 

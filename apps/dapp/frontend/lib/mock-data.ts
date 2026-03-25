@@ -44,7 +44,7 @@ const generateMockTransactions = (count: number): Transaction[] => {
             vaultName: vault,
             timestamp: date.toISOString(),
             status,
-            txHash: `G${String.fromCharCode(65 + Math.floor(Math.random() * 26))}...${Math.floor(Math.random() * 900 + 100)}`,
+            txHash: Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(""),
         });
     }
     return txs;
