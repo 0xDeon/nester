@@ -2,53 +2,37 @@
 
 import { useWallet } from "@/components/wallet-provider";
 import { Navbar } from "@/components/navbar";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { truncateAddress } from "@/lib/utils";
-import {
-    TrendingUp,
-    Vault,
-    ArrowDownToLine,
-    Sparkles,
-    ArrowUpRight,
-} from "lucide-react";
+import { Sparkles, ArrowRight } from "lucide-react";
 
-const stats = [
-    {
-        label: "Total Balance",
-        value: "$0.00",
-        change: null,
-        icon: Vault,
-    },
-    {
-        label: "Total Yield Earned",
-        value: "$0.00",
-        change: "+0.00%",
-        icon: TrendingUp,
-    },
-    {
-        label: "Active Vaults",
-        value: "0",
-        change: null,
-        icon: ArrowDownToLine,
-    },
-    {
-        label: "Prometheus Insights",
-        value: "—",
-        change: null,
-        icon: Sparkles,
-    },
-];
+// Mock Data
+import { 
+    mockTransactions, 
+    mockVaultPositions, 
+    mockPortfolioStats 
+} from "@/lib/mock-data";
+
+// Components
+import { DashboardStats } from "@/components/dashboard/dashboard-stats";
+import { VaultPositionsTable } from "@/components/dashboard/vault-positions-table";
+import { PortfolioCharts } from "@/components/dashboard/portfolio-charts";
+import { RecentActivity } from "@/components/dashboard/recent-activity";
 
 export default function Dashboard() {
     const { isConnected, address } = useWallet();
     const router = useRouter();
+    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         if (!isConnected) {
             router.push("/");
+        } else {
+            // Simulate initial data fetch
+            const timer = setTimeout(() => setIsLoading(false), 800);
+            return () => clearTimeout(timer);
         }
     }, [isConnected, router]);
 
@@ -61,142 +45,106 @@ export default function Dashboard() {
             <main className="mx-auto max-w-[1536px] px-4 md:px-8 lg:px-12 xl:px-16 pt-28 pb-16">
                 {/* Header */}
                 <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.5 }}
                     className="mb-10"
                 >
                     <h1 className="font-heading text-2xl font-light text-foreground sm:text-3xl">
                         Welcome back
                     </h1>
-                    <p className="mt-1 text-muted-foreground font-mono text-sm">
-                        {address ? truncateAddress(address, 8) : ""}
+                    <p className="mt-1 text-muted-foreground font-mono text-xs opacity-60">
+                        {address ? truncateAddress(address, 12) : ""}
                     </p>
                 </motion.div>
 
-                {/* Stats Grid */}
-                <div className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {stats.map((stat, i) => (
-                        <motion.div
-                            key={stat.label}
-                            initial={{ opacity: 0, y: 20 }}
+                {/* Portfolio Content */}
+                <div className="flex flex-col gap-10">
+                    <DashboardStats stats={mockPortfolioStats} loading={isLoading} />
+                    
+                    <div className="grid gap-8">
+                        {/* Charts Area */}
+                        <motion.section
+                            initial={{ opacity: 0, y: 30 }}
                             animate={{ opacity: 1, y: 0 }}
-                            transition={{
-                                duration: 0.5,
-                                delay: 0.1 + i * 0.08,
-                            }}
-                            className="group rounded-2xl border border-border bg-white p-5 transition-all hover:border-black/15 hover:shadow-sm"
+                            transition={{ duration: 0.6, delay: 0.4 }}
                         >
-                            <div className="mb-4 flex items-center justify-between">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-secondary">
-                                    <stat.icon className="h-4 w-4 text-foreground/50" />
+                            <PortfolioCharts positions={mockVaultPositions} />
+                        </motion.section>
+
+                        <div className="grid gap-8 lg:grid-cols-3">
+                            {/* Positions List */}
+                            <motion.div 
+                                className="lg:col-span-2"
+                                initial={{ opacity: 0, y: 30 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.6, delay: 0.6 }}
+                            >
+                                <VaultPositionsTable positions={mockVaultPositions} />
+                            </motion.div>
+
+                            {/* Prometheus Column */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 30 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.6, delay: 0.8 }}
+                                className="flex flex-col gap-8"
+                            >
+                                {/* AI Insights Card */}
+                                <div className="rounded-2xl border border-border bg-white p-6 shadow-sm border-emerald-100 bg-gradient-to-br from-white via-white to-emerald-50/20 relative overflow-hidden group">
+                                    <div className="mb-6 flex items-center justify-between relative z-10">
+                                        <h2 className="font-heading text-lg font-light text-foreground">
+                                            <span className="font-display italic">Prometheus</span> Insights
+                                        </h2>
+                                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100">
+                                            <div className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" />
+                                            <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-widest">
+                                                AI Advisory
+                                            </span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="space-y-4 relative z-10">
+                                        <div className="p-3.5 rounded-xl bg-white border border-border/60 hover:border-emerald-200 transition-colors cursor-pointer group/item shadow-sm shadow-emerald-900/5">
+                                            <p className="text-xs font-semibold text-foreground mb-1 flex items-center gap-2">
+                                                <Sparkles className="h-3 w-3 text-emerald-500" />
+                                                Yield Opportunity
+                                            </p>
+                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                                Move $12k USDC from Balanced Growth to DeFi500 to capture 4.2% higher APY.
+                                            </p>
+                                            <div className="mt-2 flex items-center text-[10px] font-bold text-emerald-600 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                                                Execute Rebalance <ArrowRight className="ml-1 h-3 w-3" />
+                                            </div>
+                                        </div>
+
+                                        <div className="p-3.5 rounded-xl bg-white border border-border/60 hover:border-emerald-200 transition-colors cursor-pointer group/item shadow-sm shadow-emerald-900/5">
+                                            <p className="text-xs font-semibold text-foreground mb-1 flex items-center gap-2">
+                                                <Sparkles className="h-3 w-3 text-emerald-500" />
+                                                Risk Alert
+                                            </p>
+                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                                Diversify XLM positions. Current concentration exceeds recommended 30% threshold.
+                                            </p>
+                                            <div className="mt-2 flex items-center text-[10px] font-bold text-emerald-600 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                                                View Strategy <ArrowRight className="ml-1 h-3 w-3" />
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                                {stat.change && (
-                                    <span className="flex items-center gap-0.5 text-xs font-medium text-emerald-600">
-                                        <ArrowUpRight className="h-3 w-3" />
-                                        {stat.change}
-                                    </span>
-                                )}
-                            </div>
-                            <p className="text-2xl font-heading font-light text-foreground">
-                                {stat.value}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                                {stat.label}
-                            </p>
-                        </motion.div>
-                    ))}
-                </div>
+                            </motion.div>
+                        </div>
 
-                {/* Panels */}
-                <div className="grid gap-6 lg:grid-cols-2">
-                    {/* Vaults Panel */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5, delay: 0.4 }}
-                        className="rounded-2xl border border-border bg-white p-6"
-                    >
-                        <div className="mb-6 flex items-center justify-between">
-                            <h2 className="font-heading text-lg font-light text-foreground">
-                                Your Vaults
-                            </h2>
-                            <button className="text-xs font-medium text-foreground/60 hover:text-foreground transition-colors">
-                                Create Vault
-                            </button>
-                        </div>
-                        <div className="flex flex-col items-center justify-center py-12 text-center">
-                            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary">
-                                <Vault className="h-6 w-6 text-muted-foreground" />
-                            </div>
-                            <p className="text-sm font-medium text-foreground/80">
-                                No vaults yet
-                            </p>
-                            <p className="mt-1 max-w-xs text-xs text-muted-foreground leading-relaxed">
-                                Create your first vault to start earning
-                                optimized yield across DeFi protocols.
-                            </p>
-                            <div className="mt-5 p-[3px] rounded-full border border-black/15 shadow-lg bg-white inline-block">
-                                <Link href="/dashboard/vaults">
-                                    <button className="rounded-full bg-gradient-to-r from-[#0a0a0a] to-[#1a1a2e] border border-white/10 hover:from-[#1a1a2e] hover:to-[#0a0a0a] px-6 py-2 text-sm font-medium text-white transition-all">
-                                        Get Started
-                                    </button>
-                                </Link>
-                            </div>
-                        </div>
-                    </motion.div>
-
-                    {/* Prometheus Panel */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5, delay: 0.5 }}
-                        className="rounded-2xl border border-border bg-white p-6"
-                    >
-                        <div className="mb-6 flex items-center justify-between">
-                            <h2 className="font-heading text-lg font-light text-foreground">
-                                <span className="font-display italic">Prometheus</span>{" "}
-                                Insights
-                            </h2>
-                            <div className="flex items-center gap-1.5">
-                                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                <span className="text-xs text-muted-foreground">
-                                    AI Advisory
-                                </span>
-                            </div>
-                        </div>
-                        <div className="flex flex-col items-center justify-center py-12 text-center">
-                            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary">
-                                <Sparkles className="h-6 w-6 text-muted-foreground" />
-                            </div>
-                            <p className="text-sm font-medium text-foreground/80">
-                                No insights available
-                            </p>
-                            <p className="mt-1 max-w-xs text-xs text-muted-foreground leading-relaxed">
-                                Connect a vault to receive AI-driven
-                                recommendations on yield optimization and risk
-                                management.
-                            </p>
-                        </div>
-                    </motion.div>
-                </div>
-
-                {/* Recent Activity */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, delay: 0.6 }}
-                    className="mt-6 rounded-2xl border border-border bg-white p-6"
-                >
-                    <h2 className="mb-4 font-heading text-lg font-light text-foreground">
-                        Recent Activity
-                    </h2>
-                    <div className="flex items-center justify-center py-10">
-                        <p className="text-sm text-muted-foreground">
-                            No recent transactions
-                        </p>
+                        {/* Recent Activity Full Width */}
+                        <motion.section
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 1, delay: 1 }}
+                        >
+                            <RecentActivity transactions={mockTransactions} />
+                        </motion.section>
                     </div>
-                </motion.div>
+                </div>
             </main>
         </div>
     );
