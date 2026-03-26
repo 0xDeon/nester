@@ -12,6 +12,13 @@ type Config struct {
 	CORSOrigins     []string
 	CORSMethods     []string
 	CORSHeaders     []string
+	Prometheus      PrometheusConfig
+}
+
+type PrometheusConfig struct {
+	BaseURL string
+	APIKey  string
+	Timeout time.Duration
 }
 
 func Load() *Config {
@@ -21,6 +28,11 @@ func Load() *Config {
 		CORSOrigins:     parseCommaSeparated("CORS_ALLOWED_ORIGINS", "*"),
 		CORSMethods:     parseCommaSeparated("CORS_ALLOWED_METHODS", "GET,POST,PUT,PATCH,DELETE,OPTIONS"),
 		CORSHeaders:     parseCommaSeparated("CORS_ALLOWED_HEADERS", "Accept,Authorization,Content-Type,X-Request-ID"),
+		Prometheus: PrometheusConfig{
+			BaseURL: getEnvOrDefault("PROMETHEUS_BASE_URL", "http://localhost:8000"),
+			APIKey:  getEnvOrDefault("PROMETHEUS_API_KEY", ""),
+			Timeout: parseDurationOrDefault("PROMETHEUS_TIMEOUT", 5*time.Second),
+		},
 	}
 }
 

@@ -1,9 +1,39 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
 
 use nester_access_control::{AccessControl, Role};
-use nester_common::ContractError;
+use nester_common::{emit_event, ContractError};
+
+const VAULT: Symbol = symbol_short!("VAULT");
+const DEPOSIT: Symbol = symbol_short!("DEPOSIT");
+const WITHDRAW: Symbol = symbol_short!("WITHDRAW");
+const PAUSE: Symbol = symbol_short!("PAUSE");
+const UNPAUSE: Symbol = symbol_short!("UNPAUSE");
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DepositEventData {
+    pub amount: i128,
+    pub shares_minted: i128,
+    pub new_balance: i128,
+    pub total_deposits: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct WithdrawEventData {
+    pub amount: i128,
+    pub shares_burned: i128,
+    pub new_balance: i128,
+    pub total_deposits: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TimestampEventData {
+    pub timestamp: u64,
+}
 
 // ---------------------------------------------------------------------------
 // Storage
@@ -41,7 +71,15 @@ impl VaultContract {
         caller.require_auth();
         AccessControl::require_role(&env, &caller, Role::Admin);
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish((symbol_short!("paused"), caller), ());
+        emit_event(
+            &env,
+            VAULT,
+            PAUSE,
+            caller.clone(),
+            TimestampEventData {
+                timestamp: env.ledger().timestamp(),
+            },
+        );
     }
 
     /// Resume vault operations. Requires [`Role::Admin`].
@@ -49,8 +87,15 @@ impl VaultContract {
         caller.require_auth();
         AccessControl::require_role(&env, &caller, Role::Admin);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events()
-            .publish((symbol_short!("unpaused"), caller), ());
+        emit_event(
+            &env,
+            VAULT,
+            UNPAUSE,
+            caller.clone(),
+            TimestampEventData {
+                timestamp: env.ledger().timestamp(),
+            },
+        );
     }
 
     /// Grant `role` to `grantee`. Requires caller to be an Admin.
@@ -78,15 +123,43 @@ impl VaultContract {
     // -----------------------------------------------------------------------
 
     /// Deposit funds into the vault.
-    pub fn deposit(env: Env) {
+    pub fn deposit(env: Env, caller: Address, amount: i128) {
+        caller.require_auth();
         Self::require_not_paused(&env);
         // TODO: deposit logic
+        // For now, emit event with dummy values to satisfy schema
+        emit_event(
+            &env,
+            VAULT,
+            DEPOSIT,
+            caller,
+            DepositEventData {
+                amount,
+                shares_minted: amount, // dummy
+                new_balance: amount,   // dummy
+                total_deposits: amount, // dummy
+            },
+        );
     }
 
     /// Withdraw funds from the vault.
-    pub fn withdraw(env: Env) {
+    pub fn withdraw(env: Env, caller: Address, amount: i128) {
+        caller.require_auth();
         Self::require_not_paused(&env);
         // TODO: withdrawal logic
+        // For now, emit event with dummy values to satisfy schema
+        emit_event(
+            &env,
+            VAULT,
+            WITHDRAW,
+            caller,
+            WithdrawEventData {
+                amount,
+                shares_burned: amount, // dummy
+                new_balance: 0,        // dummy
+                total_deposits: 0,     // dummy
+            },
+        );
     }
 
     /// Return the vault balance.
@@ -188,6 +261,6 @@ mod tests {
         let client = VaultContractClient::new(&env, &contract_id);
         client.initialize(&admin);
         client.pause(&admin);
-        client.deposit(); // must panic
+        client.deposit(&admin, &1000); // must panic
     }
 }

@@ -11,13 +11,17 @@ import (
 
 	"github.com/Suncrest-Labs/nester/internal/config"
 	"github.com/Suncrest-Labs/nester/internal/handler"
+	"github.com/Suncrest-Labs/nester/internal/service"
 )
 
 func main() {
 	cfg := config.Load()
 
 	health := handler.NewHealthHandler()
-	router := handler.NewRouter(cfg, health)
+	prometheus := service.NewPrometheusClient(cfg.Prometheus)
+	intelligence := handler.NewIntelligenceHandler(prometheus)
+
+	router := handler.NewRouter(cfg, health, intelligence)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,

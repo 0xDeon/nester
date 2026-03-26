@@ -5,8 +5,18 @@ use soroban_sdk::{
 };
 
 use nester_access_control::{AccessControl, Role};
-use nester_common::{ContractError, BASIS_POINT_SCALE};
+use nester_common::{emit_event, ContractError, BASIS_POINT_SCALE};
 use yield_registry::{SourceStatus, YieldRegistryContractClient};
+
+const STRATEGY: Symbol = symbol_short!("STRATEGY");
+const WEIGHTS_UPDATED: Symbol = symbol_short!("WTS_SET");
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct WeightsUpdatedEventData {
+    pub old_weights: Vec<AllocationWeight>,
+    pub new_weights: Vec<AllocationWeight>,
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,8 +97,19 @@ impl AllocationStrategyContract {
             }
         }
 
+        let old_weights = Self::get_weights(env.clone());
         env.storage().instance().set(&DataKey::Weights, &weights);
-        env.events().publish((symbol_short!("wts_set"), caller), ());
+
+        emit_event(
+            &env,
+            STRATEGY,
+            WEIGHTS_UPDATED,
+            caller,
+            WeightsUpdatedEventData {
+                old_weights,
+                new_weights: weights,
+            },
+        );
     }
 
     /// Return the currently stored allocation weights.

@@ -26,7 +26,26 @@ use soroban_sdk::{
 };
 
 use nester_access_control::{AccessControl, Role};
-use nester_common::ContractError;
+use nester_common::{emit_event_with_sym, ContractError};
+
+const REGISTRY: Symbol = symbol_short!("REGISTRY");
+const SOURCE_ADDED: Symbol = symbol_short!("SRC_ADD");
+const SOURCE_UPDATED: Symbol = symbol_short!("SRC_UPD");
+const SOURCE_REMOVED: Symbol = symbol_short!("SRC_REM");
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SourceAddedEventData {
+    pub contract_address: Address,
+    pub protocol_type: ProtocolType,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SourceUpdatedEventData {
+    pub old_status: SourceStatus,
+    pub new_status: SourceStatus,
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -120,8 +139,8 @@ impl YieldRegistryContract {
 
         let source = YieldSource {
             id: id.clone(),
-            contract_address,
-            protocol_type,
+            contract_address: contract_address.clone(),
+            protocol_type: protocol_type.clone(),
             status: SourceStatus::Active,
             added_at: env.ledger().timestamp(),
         };
@@ -134,8 +153,16 @@ impl YieldRegistryContract {
         list.push_back(id.clone());
         env.storage().instance().set(&DataKey::SourceList, &list);
 
-        env.events()
-            .publish((symbol_short!("src_add"), caller, id), ());
+        emit_event_with_sym(
+            &env,
+            REGISTRY,
+            SOURCE_ADDED,
+            id.clone(),
+            SourceAddedEventData {
+                contract_address,
+                protocol_type,
+            },
+        );
     }
 
     /// Update the lifecycle status of a registered source.
@@ -154,13 +181,22 @@ impl YieldRegistryContract {
             panic_with_error!(&env, ContractError::InvalidOperation);
         }
 
-        source.status = new_status;
+        let old_status = source.status.clone();
+        source.status = new_status.clone();
         env.storage()
             .instance()
             .set(&DataKey::Source(id.clone()), &source);
 
-        env.events()
-            .publish((symbol_short!("src_upd"), caller, id), ());
+        emit_event_with_sym(
+            &env,
+            REGISTRY,
+            SOURCE_UPDATED,
+            id.clone(),
+            SourceUpdatedEventData {
+                old_status,
+                new_status,
+            },
+        );
     }
 
     /// Remove a yield source from the registry entirely.
@@ -188,8 +224,7 @@ impl YieldRegistryContract {
         list = new_list;
         env.storage().instance().set(&DataKey::SourceList, &list);
 
-        env.events()
-            .publish((symbol_short!("src_rem"), caller, id), ());
+        emit_event_with_sym(&env, REGISTRY, SOURCE_REMOVED, id.clone(), ());
     }
 
     // -----------------------------------------------------------------------
