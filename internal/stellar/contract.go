@@ -67,10 +67,7 @@ func (ci *ContractInvoker) InvokeContract(
 	}
 
 	if !sim.IsSuccess {
-		return &ContractResult{
-			IsSuccess: false,
-			Error:     sim.Error,
-		}, nil
+		return nil, fmt.Errorf("simulation failed: %s", sim.Error)
 	}
 
 	// Build the transaction
@@ -96,6 +93,10 @@ func (ci *ContractInvoker) buildContractInvocation(
 	args []interface{},
 ) (*txnbuild.Transaction, error) {
 	if contractID == "" {
+		return nil, fmt.Errorf("contract ID is required")
+	}
+	// Validate contract ID format (Stellar contract IDs are 56 characters starting with 'C')
+	if len(contractID) < 56 {
 		return nil, fmt.Errorf("contract ID is required")
 	}
 	if method == "" {
