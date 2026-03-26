@@ -26,6 +26,7 @@ coverage/
 *.pem
 Thumbs.db
 CLAUDE.md
+.claude/
 
 # Debug logs
 npm-debug.log*
