@@ -46,6 +46,7 @@
     --input: 240 5.9% 90%;
     --ring: 255 60% 60%;
     --gradient-brand: linear-gradient(135deg, #B6509E 0%, #2EBAC6 100%);
+    --touch-target: 44px;
 }
 
 * {
@@ -161,4 +162,22 @@ body {
 }
 .scrollbar-hide::-webkit-scrollbar {
     display: none;
+}
+
+.safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-content-pad {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+}
+
+.tab-label {
+    font-size: 10px;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+}
+
+html.menu-open {
+    overflow: hidden;
 }

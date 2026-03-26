@@ -28,9 +28,27 @@
 
 #![no_std]
 
-use soroban_sdk::{contracttype, panic_with_error, symbol_short, Address, Env};
+use soroban_sdk::{contracttype, panic_with_error, symbol_short, Address, Env, Symbol};
 
-use nester_common::ContractError;
+use nester_common::{emit_event, ContractError};
+
+const ACCESS: Symbol = symbol_short!("ACCESS");
+const ROLE_GRANTED: Symbol = symbol_short!("GRANT");
+const ROLE_REVOKED: Symbol = symbol_short!("REVOKE");
+const ADMIN_TRANSFER: Symbol = symbol_short!("XFR_ACC");
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RoleEventData {
+    pub role: Role,
+    pub actor: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AdminTransferEventData {
+    pub old_admin: Address,
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -100,8 +118,16 @@ impl AccessControl {
         internal_set_role(env, admin, Role::Admin, true);
         env.storage().instance().set(&DataKey::AdminCount, &1u32);
 
-        env.events()
-            .publish((symbol_short!("ac_init"), admin.clone()), Role::Admin);
+        emit_event(
+            env,
+            ACCESS,
+            ROLE_GRANTED,
+            admin.clone(),
+            RoleEventData {
+                role: Role::Admin,
+                actor: admin.clone(), // self-grant during init
+            },
+        );
     }
 
     /// Returns `true` if `account` currently holds `role`, `false` otherwise.
@@ -130,9 +156,15 @@ impl AccessControl {
             internal_inc_admin_count(env);
         }
 
-        env.events().publish(
-            (symbol_short!("grant"), grantor.clone(), grantee.clone()),
-            role,
+        emit_event(
+            env,
+            ACCESS,
+            ROLE_GRANTED,
+            grantee.clone(),
+            RoleEventData {
+                role,
+                actor: grantor.clone(),
+            },
         );
     }
 
@@ -159,9 +191,15 @@ impl AccessControl {
 
         internal_set_role(env, target, role.clone(), false);
 
-        env.events().publish(
-            (symbol_short!("revoke"), revoker.clone(), target.clone()),
-            role,
+        emit_event(
+            env,
+            ACCESS,
+            ROLE_REVOKED,
+            target.clone(),
+            RoleEventData {
+                role,
+                actor: revoker.clone(),
+            },
         );
     }
 
@@ -242,9 +280,14 @@ impl AccessControl {
 
         env.storage().instance().remove(&DataKey::PendingTransfer);
 
-        env.events().publish(
-            (symbol_short!("xfr_acc"), new_admin.clone()),
-            proposal.from.clone(),
+        emit_event(
+            env,
+            ACCESS,
+            ADMIN_TRANSFER,
+            new_admin.clone(),
+            AdminTransferEventData {
+                old_admin: proposal.from,
+            },
         );
     }
 }
