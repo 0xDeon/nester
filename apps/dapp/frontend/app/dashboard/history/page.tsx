@@ -3,7 +3,7 @@
 import { useWallet } from "@/components/wallet-provider";
 import { Navbar } from "@/components/navbar";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useMemo } from "react";
+import { Fragment, useEffect, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
     History, 
@@ -90,18 +90,19 @@ export default function HistoryPage() {
             tx.id, tx.type, tx.amount, tx.asset, tx.vaultName, tx.timestamp, tx.status, tx.txHash
         ]);
         
-        const csvContent = "data:text/csv;charset=utf-8," + 
-            [headers, ...rows].map(row => 
-                row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(",")
-            ).join("\n");
+        const csvContent = [headers, ...rows].map(row => 
+            row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(",")
+        ).join("\n");
         
-        const encodedUri = encodeURI(csvContent);
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
+        link.setAttribute("href", url);
         link.setAttribute("download", `nester_history_${new Date().toISOString().split('T')[0]}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     };
 
     if (!isConnected) return null;
@@ -381,33 +382,43 @@ export default function HistoryPage() {
                                     </button>
                                     
                                     <div className="flex items-center gap-1.5">
-                                        {Array.from({ 
-                                            length: Math.min(totalPages, Math.max(1, Math.min(totalPages, currentPage + 2)) - Math.max(1, currentPage - 2) + 1)
-                                        }, (_, i) => {
-                                            const startPage = Math.max(1, currentPage - 2);
-                                            const endPage = Math.min(totalPages, startPage + 4);
-                                            const actualStartPage = endPage - startPage < 4 ? Math.max(1, endPage - 4) : startPage;
-                                            
-                                            // More robust sliding window calculation
-                                            const page = actualStartPage + i;
-                                            if (page > totalPages) return null;
-                                            
-                                            return (
-                                                <button 
-                                                    key={page}
-                                                    onClick={() => setCurrentPage(page)}
-                                                    className={cn(
-                                                        "h-8 w-8 rounded-xl text-xs font-medium transition-all",
-                                                        currentPage === page 
-                                                        ? "bg-brand-dark text-white shadow-md shadow-black/10" 
-                                                        : "bg-white border border-border text-foreground hover:border-black/20"
-                                                    )}
-                                                >
-                                                    {page}
-                                                </button>
-                                            );
-                                        })}
-                                        {totalPages > 5 && currentPage < totalPages - 2 && <span className="mx-1 text-muted-foreground">...</span>}
+                                        {(() => {
+                                            let pages: number[] = [];
+                                            if (totalPages <= 5) {
+                                                pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+                                            } else {
+                                                if (currentPage <= 3) {
+                                                    pages = [1, 2, 3, 4, totalPages];
+                                                } else if (currentPage >= totalPages - 2) {
+                                                    pages = [1, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+                                                } else {
+                                                    pages = [1, currentPage - 1, currentPage, currentPage + 1, totalPages];
+                                                }
+                                            }
+                                            return pages.map((page, index, array) => {
+                                                const isGap = index > 0 && page - array[index - 1] > 1;
+                                                return (
+                                                    <Fragment key={page}>
+                                                        {isGap && (
+                                                            <span className="mx-0.5 text-muted-foreground tracking-widest text-xs">
+                                                                ...
+                                                            </span>
+                                                        )}
+                                                        <button 
+                                                            onClick={() => setCurrentPage(page)}
+                                                            className={cn(
+                                                                "h-8 w-8 rounded-xl text-xs font-medium transition-all",
+                                                                currentPage === page 
+                                                                ? "bg-brand-dark text-white shadow-md shadow-black/10" 
+                                                                : "bg-white border border-border text-foreground hover:border-black/20"
+                                                            )}
+                                                        >
+                                                            {page}
+                                                        </button>
+                                                    </Fragment>
+                                                );
+                                            });
+                                        })()}
                                     </div>
 
                                     <button 
