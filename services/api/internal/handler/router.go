@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/cors"
 )
 
-func NewRouter(cfg *config.Config, health *HealthHandler) http.Handler {
+func NewRouter(cfg *config.Config, health *HealthHandler, intelligence *IntelligenceHandler) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -33,6 +33,10 @@ func NewRouter(cfg *config.Config, health *HealthHandler) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/healthz", health.Healthz)
 		r.Get("/readyz", health.Readyz)
+
+		r.Get("/vaults/{id}/recommendations", intelligence.GetVaultRecommendations)
+		r.Get("/intelligence/market", intelligence.GetMarketSentiment)
+		r.Get("/users/{userId}/insights", intelligence.GetPortfolioInsights)
 	})
 
 	return r

@@ -26,6 +26,7 @@ coverage/
 *.pem
 Thumbs.db
 CLAUDE.md
+.claude/
 
 # Debug logs
 npm-debug.log*
@@ -51,3 +52,15 @@ target/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
+
+# test snapshots
+test_snapshots/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
