@@ -1,40 +1,56 @@
 "use client";
 
-import { useWallet } from "@/components/wallet-provider";
-import { Navbar } from "@/components/navbar";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import {
+    ArrowDownToLine,
+    ArrowUpRight,
+    Sparkles,
+    TrendingUp,
+    Vault,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+
+import { Navbar } from "@/components/navbar";
+import { useWallet } from "@/components/wallet-provider";
+import {
+    usePortfolio,
+    type PortfolioPosition,
+} from "@/components/portfolio-provider";
+import { WithdrawModal } from "@/components/vault-action-modals";
 import { truncateAddress } from "@/lib/utils";
-import { Sparkles, ArrowRight } from "lucide-react";
-
-// Mock Data
-import { 
-    mockTransactions, 
-    mockVaultPositions, 
-    mockPortfolioStats 
-} from "@/lib/mock-data";
-
-// Components
-import { DashboardStats } from "@/components/dashboard/dashboard-stats";
-import { VaultPositionsTable } from "@/components/dashboard/vault-positions-table";
-import { PortfolioCharts } from "@/components/dashboard/portfolio-charts";
-import { RecentActivity } from "@/components/dashboard/recent-activity";
 
 export default function Dashboard() {
     const { isConnected, address } = useWallet();
+    const { positions, transactions, balances } = usePortfolio();
     const router = useRouter();
-    const [isLoading, setIsLoading] = useState(true);
+    const [selectedPosition, setSelectedPosition] = useState<PortfolioPosition | null>(null);
 
     useEffect(() => {
         if (!isConnected) {
             router.push("/");
-        } else {
-            // Simulate initial data fetch
-            const timer = setTimeout(() => setIsLoading(false), 800);
-            return () => clearTimeout(timer);
         }
     }, [isConnected, router]);
+
+    const stats = useMemo(() => {
+        const totalBalance = positions.reduce(
+            (sum, position) => sum + position.currentValue,
+            0
+        );
+        const totalYield = positions.reduce(
+            (sum, position) => sum + position.yieldEarned,
+            0
+        );
+
+        return {
+            totalBalance,
+            totalYield,
+            activeVaults: positions.length,
+        };
+    }, [positions]);
+
+    const recentTransactions = transactions.slice(0, 5);
 
     if (!isConnected) return null;
 
@@ -42,110 +58,274 @@ export default function Dashboard() {
         <div className="min-h-screen bg-background">
             <Navbar />
 
-            <main className="mx-auto max-w-[1536px] px-4 md:px-8 lg:px-12 xl:px-16 pt-28 pb-16">
-                {/* Header */}
+            <main className="mx-auto max-w-[1536px] px-4 pb-16 pt-28 md:px-8 lg:px-12 xl:px-16">
                 <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
                     className="mb-10"
                 >
                     <h1 className="font-heading text-2xl font-light text-foreground sm:text-3xl">
                         Welcome back
                     </h1>
-                    <p className="mt-1 text-muted-foreground font-mono text-xs opacity-60">
-                        {address ? truncateAddress(address, 12) : ""}
+                    <p className="mt-1 font-mono text-sm text-muted-foreground">
+                        {address ? truncateAddress(address, 8) : ""}
                     </p>
                 </motion.div>
 
-                {/* Portfolio Content */}
-                <div className="flex flex-col gap-10">
-                    <DashboardStats stats={mockPortfolioStats} loading={isLoading} />
-                    
-                    <div className="grid gap-8">
-                        {/* Charts Area */}
-                        <motion.section
-                            initial={{ opacity: 0, y: 30 }}
+                <div className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {[
+                        {
+                            label: "Total Balance",
+                            value: `$${stats.totalBalance.toLocaleString("en-US", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                            })}`,
+                            change: null,
+                            icon: Vault,
+                        },
+                        {
+                            label: "Total Yield Earned",
+                            value: `$${stats.totalYield.toLocaleString("en-US", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                            })}`,
+                            change: positions.length ? "+Live" : null,
+                            icon: TrendingUp,
+                        },
+                        {
+                            label: "Active Vaults",
+                            value: String(stats.activeVaults),
+                            change: null,
+                            icon: ArrowDownToLine,
+                        },
+                        {
+                            label: "Wallet USDC Balance",
+                            value: `$${(balances.USDC ?? 0).toLocaleString("en-US", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                            })}`,
+                            change: null,
+                            icon: Sparkles,
+                        },
+                    ].map((stat, index) => (
+                        <motion.div
+                            key={stat.label}
+                            initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.6, delay: 0.4 }}
+                            transition={{
+                                duration: 0.5,
+                                delay: 0.1 + index * 0.08,
+                            }}
+                            className="group rounded-2xl border border-border bg-white p-5 transition-all hover:border-black/15 hover:shadow-sm"
                         >
-                            <PortfolioCharts positions={mockVaultPositions} />
-                        </motion.section>
-
-                        <div className="grid gap-8 lg:grid-cols-3">
-                            {/* Positions List */}
-                            <motion.div 
-                                className="lg:col-span-2"
-                                initial={{ opacity: 0, y: 30 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.6, delay: 0.6 }}
-                            >
-                                <VaultPositionsTable positions={mockVaultPositions} />
-                            </motion.div>
-
-                            {/* Prometheus Column */}
-                            <motion.div
-                                initial={{ opacity: 0, y: 30 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.6, delay: 0.8 }}
-                                className="flex flex-col gap-8"
-                            >
-                                {/* AI Insights Card */}
-                                <div className="rounded-2xl border border-border bg-white p-6 shadow-sm border-emerald-100 bg-gradient-to-br from-white via-white to-emerald-50/20 relative overflow-hidden group">
-                                    <div className="mb-6 flex items-center justify-between relative z-10">
-                                        <h2 className="font-heading text-lg font-light text-foreground">
-                                            <span className="font-display italic">Prometheus</span> Insights
-                                        </h2>
-                                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100">
-                                            <div className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" />
-                                            <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-widest">
-                                                AI Advisory
-                                            </span>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="space-y-4 relative z-10">
-                                        <div className="p-3.5 rounded-xl bg-white border border-border/60 hover:border-emerald-200 transition-colors cursor-pointer group/item shadow-sm shadow-emerald-900/5">
-                                            <p className="text-xs font-semibold text-foreground mb-1 flex items-center gap-2">
-                                                <Sparkles className="h-3 w-3 text-emerald-500" />
-                                                Yield Opportunity
-                                            </p>
-                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                                Move $12k USDC from Balanced Growth to DeFi500 to capture 4.2% higher APY.
-                                            </p>
-                                            <div className="mt-2 flex items-center text-[10px] font-bold text-emerald-600 opacity-0 group-hover/item:opacity-100 transition-opacity">
-                                                Execute Rebalance <ArrowRight className="ml-1 h-3 w-3" />
-                                            </div>
-                                        </div>
-
-                                        <div className="p-3.5 rounded-xl bg-white border border-border/60 hover:border-emerald-200 transition-colors cursor-pointer group/item shadow-sm shadow-emerald-900/5">
-                                            <p className="text-xs font-semibold text-foreground mb-1 flex items-center gap-2">
-                                                <Sparkles className="h-3 w-3 text-emerald-500" />
-                                                Risk Alert
-                                            </p>
-                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                                Diversify XLM positions. Current concentration exceeds recommended 30% threshold.
-                                            </p>
-                                            <div className="mt-2 flex items-center text-[10px] font-bold text-emerald-600 opacity-0 group-hover/item:opacity-100 transition-opacity">
-                                                View Strategy <ArrowRight className="ml-1 h-3 w-3" />
-                                            </div>
-                                        </div>
-                                    </div>
+                            <div className="mb-4 flex items-center justify-between">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-secondary">
+                                    <stat.icon className="h-4 w-4 text-foreground/50" />
                                 </div>
-                            </motion.div>
+                                {stat.change && (
+                                    <span className="flex items-center gap-0.5 text-xs font-medium text-emerald-600">
+                                        <ArrowUpRight className="h-3 w-3" />
+                                        {stat.change}
+                                    </span>
+                                )}
+                            </div>
+                            <p className="font-heading text-2xl font-light text-foreground">
+                                {stat.value}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                {stat.label}
+                            </p>
+                        </motion.div>
+                    ))}
+                </div>
+
+                <div className="grid gap-6 lg:grid-cols-2">
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5, delay: 0.4 }}
+                        className="rounded-2xl border border-border bg-white p-6"
+                    >
+                        <div className="mb-6 flex items-center justify-between">
+                            <h2 className="font-heading text-lg font-light text-foreground">
+                                Your Vaults
+                            </h2>
+                            <Link
+                                href="/dashboard/vaults"
+                                className="text-xs font-medium text-foreground/60 transition-colors hover:text-foreground"
+                            >
+                                Add Deposit
+                            </Link>
                         </div>
 
-                        {/* Recent Activity Full Width */}
-                        <motion.section
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ duration: 1, delay: 1 }}
-                        >
-                            <RecentActivity transactions={mockTransactions} />
-                        </motion.section>
-                    </div>
+                        {positions.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-12 text-center">
+                                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary">
+                                    <Vault className="h-6 w-6 text-muted-foreground" />
+                                </div>
+                                <p className="text-sm font-medium text-foreground/80">
+                                    No vaults yet
+                                </p>
+                                <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
+                                    Create your first vault position to start earning optimized yield across DeFi protocols.
+                                </p>
+                                <div className="mt-5 inline-block rounded-full border border-black/15 bg-white p-[3px] shadow-lg">
+                                    <Link href="/dashboard/vaults">
+                                        <button className="rounded-full bg-gradient-to-r from-[#0a0a0a] to-[#1a1a2e] px-6 py-2 text-sm font-medium text-white transition-all hover:from-[#1a1a2e] hover:to-[#0a0a0a]">
+                                            Get Started
+                                        </button>
+                                    </Link>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {positions.map((position) => (
+                                    <div
+                                        key={position.id}
+                                        className="rounded-2xl border border-border bg-secondary/20 p-4"
+                                    >
+                                        <div className="flex flex-wrap items-start justify-between gap-4">
+                                            <div>
+                                                <p className="text-sm font-medium text-foreground">
+                                                    {position.vaultName}
+                                                </p>
+                                                <p className="mt-1 text-xs text-muted-foreground">
+                                                    {position.isMatured
+                                                        ? "Matured and penalty free"
+                                                        : `${position.daysRemaining} days until maturity`}
+                                                </p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-sm font-medium text-foreground">
+                                                    ${position.currentValue.toFixed(2)}
+                                                </p>
+                                                <p className="mt-1 text-xs text-emerald-600">
+                                                    +${position.yieldEarned.toFixed(2)} yield
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                                            <div className="text-xs text-muted-foreground">
+                                                {position.shares.toFixed(2)} nVault shares
+                                            </div>
+                                            <button
+                                                onClick={() => setSelectedPosition(position)}
+                                                className="rounded-full border border-border bg-white px-4 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
+                                            >
+                                                Withdraw
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </motion.div>
+
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5, delay: 0.5 }}
+                        className="rounded-2xl border border-border bg-white p-6"
+                    >
+                        <div className="mb-6 flex items-center justify-between">
+                            <h2 className="font-heading text-lg font-light text-foreground">
+                                <span className="font-display italic">Prometheus</span> Insights
+                            </h2>
+                            <div className="flex items-center gap-1.5">
+                                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                <span className="text-xs text-muted-foreground">
+                                    AI Advisory
+                                </span>
+                            </div>
+                        </div>
+
+                        {positions.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-12 text-center">
+                                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary">
+                                    <Sparkles className="h-6 w-6 text-muted-foreground" />
+                                </div>
+                                <p className="text-sm font-medium text-foreground/80">
+                                    No insights available
+                                </p>
+                                <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
+                                    Connect a vault to receive AI-driven recommendations on yield optimization and risk management.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                                    <p className="text-sm font-medium text-emerald-800">
+                                        Yield opportunity detected
+                                    </p>
+                                    <p className="mt-2 text-sm leading-relaxed text-emerald-800/80">
+                                        Your active positions are earning a combined ${stats.totalYield.toFixed(2)} in simulated yield. Matured positions can now be withdrawn without penalties.
+                                    </p>
+                                </div>
+                                <div className="rounded-2xl border border-border bg-secondary/20 p-4">
+                                    <p className="text-sm font-medium text-foreground">
+                                        Suggested action
+                                    </p>
+                                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                                        If you need liquidity soon, prioritize withdrawing from matured positions first. Otherwise, add new funds through the vaults page to compound your exposure.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </motion.div>
                 </div>
+
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.6 }}
+                    className="mt-6 rounded-2xl border border-border bg-white p-6"
+                >
+                    <h2 className="mb-4 font-heading text-lg font-light text-foreground">
+                        Recent Activity
+                    </h2>
+                    {recentTransactions.length === 0 ? (
+                        <div className="flex items-center justify-center py-10">
+                            <p className="text-sm text-muted-foreground">
+                                No recent transactions
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {recentTransactions.map((transaction) => (
+                                <div
+                                    key={transaction.id}
+                                    className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-secondary/10 px-4 py-3"
+                                >
+                                    <div>
+                                        <p className="text-sm font-medium text-foreground">
+                                            {transaction.type} · {transaction.vaultName}
+                                        </p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            {new Date(transaction.timestamp).toLocaleString()}
+                                        </p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-sm font-medium text-foreground">
+                                            {transaction.amount} {transaction.asset}
+                                        </p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            {transaction.status}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </motion.div>
             </main>
+
+            <WithdrawModal
+                open={!!selectedPosition}
+                onClose={() => setSelectedPosition(null)}
+                position={selectedPosition}
+            />
         </div>
     );
 }
+

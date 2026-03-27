@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Inter, Cormorant } from "next/font/google";
+import { PortfolioProvider } from "@/components/portfolio-provider";
 import { WalletProvider } from "@/components/wallet-provider";
 import "./globals.css";
 
@@ -41,7 +42,9 @@ export default function RootLayout({
                 suppressHydrationWarning
                 className={`${spaceGrotesk.variable} ${inter.variable} ${cormorant.variable} antialiased`}
             >
-                <WalletProvider>{children}</WalletProvider>
+                <WalletProvider>
+                    <PortfolioProvider>{children}</PortfolioProvider>
+                </WalletProvider>
             </body>
         </html>
     );
