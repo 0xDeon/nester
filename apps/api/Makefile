@@ -6,7 +6,11 @@ migrate-up:
 	migrate -path ./migrations -database "$(DATABASE_DSN)" up
 
 migrate-down:
-	migrate -path ./migrations -database "$(DATABASE_DSN)" down
+	@if [ -z "$(steps)" ]; then \
+		echo "Usage: make migrate-down steps=<number_of_steps>"; \
+		exit 1; \
+	fi
+	migrate -path ./migrations -database "$(DATABASE_DSN)" down $(steps)
 
 migrate-create:
 	@if [ -z "$(name)" ]; then \
