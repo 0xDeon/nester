@@ -12,9 +12,6 @@ pub enum ContractError {
     AllocationError = 7,
     RoleNotFound = 8,
     InvalidOperation = 9,
-    TimelockNotReady = 10,
-    TimelockExpired = 11,
-    TimelockNotFound = 12,
-    TimelockInvalidDelay = 13,
-    TimelockAlreadyExecuted = 14,
+    ExceedsLimit = 10,
+    CircuitBreakerTriggered = 11,
 }

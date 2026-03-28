@@ -1,9 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useWallet } from "@/components/wallet-provider";
+import {
+    usePortfolio,
+    type PortfolioTransactionType,
+} from "@/components/portfolio-provider";
 import { Navbar } from "@/components/navbar";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useMemo } from "react";
+import { Fragment, useEffect, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
     History, 
@@ -21,9 +26,7 @@ import {
     Filter,
     Vault as VaultIcon
 } from "lucide-react";
-import { mockTransactions, TransactionType } from "@/lib/mock-data";
 import { cn, truncateAddress } from "@/lib/utils";
-import Link from "next/link";
 
 const TYPE_ICONS = {
     "Deposit": ArrowDownLeft,
@@ -42,10 +45,11 @@ const PAGE_SIZE = 10;
 
 export default function HistoryPage() {
     const { isConnected } = useWallet();
+    const { transactions } = usePortfolio();
     const router = useRouter();
     
     const [searchQuery, setSearchQuery] = useState("");
-    const [filterType, setFilterType] = useState<TransactionType | "All">("All");
+    const [filterType, setFilterType] = useState<PortfolioTransactionType | "All">("All");
     const [filterVault, setFilterVault] = useState("All");
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
@@ -58,7 +62,7 @@ export default function HistoryPage() {
     }, [isConnected, router]);
 
     const filteredTransactions = useMemo(() => {
-        return mockTransactions.filter(tx => {
+        return transactions.filter(tx => {
             const matchesType = filterType === "All" || tx.type === filterType;
             const matchesVault = filterVault === "All" || tx.vaultName === filterVault;
             const matchesSearch = tx.txHash.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -74,7 +78,7 @@ export default function HistoryPage() {
             
             return matchesType && matchesVault && matchesSearch && matchesDate;
         });
-    }, [filterType, filterVault, searchQuery, startDate, endDate]);
+    }, [filterType, filterVault, searchQuery, startDate, endDate, transactions]);
 
     const totalPages = Math.ceil(filteredTransactions.length / PAGE_SIZE);
     const paginatedTransactions = filteredTransactions.slice(
@@ -82,7 +86,7 @@ export default function HistoryPage() {
         currentPage * PAGE_SIZE
     );
 
-    const uniqueVaults = Array.from(new Set(mockTransactions.map(tx => tx.vaultName)));
+    const uniqueVaults = Array.from(new Set(transactions.map(tx => tx.vaultName)));
 
     const exportToCSV = () => {
         const headers = ["ID", "Type", "Amount", "Asset", "Vault", "Timestamp", "Status", "Hash"];
@@ -90,23 +94,24 @@ export default function HistoryPage() {
             tx.id, tx.type, tx.amount, tx.asset, tx.vaultName, tx.timestamp, tx.status, tx.txHash
         ]);
         
-        const csvContent = "data:text/csv;charset=utf-8," + 
-            [headers, ...rows].map(row => 
-                row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(",")
-            ).join("\n");
+        const csvContent = [headers, ...rows].map(row => 
+            row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(",")
+        ).join("\n");
         
-        const encodedUri = encodeURI(csvContent);
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
+        link.setAttribute("href", url);
         link.setAttribute("download", `nester_history_${new Date().toISOString().split('T')[0]}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     };
 
     if (!isConnected) return null;
 
-    const isInitiallyEmpty = mockTransactions.length === 0;
+    const isInitiallyEmpty = transactions.length === 0;
 
     return (
         <div className="min-h-screen bg-background">
@@ -188,7 +193,7 @@ export default function HistoryPage() {
                                     <select
                                         value={filterType}
                                         onChange={(e) => {
-                                            setFilterType(e.target.value as TransactionType | "All");
+                                            setFilterType(e.target.value as PortfolioTransactionType | "All");
                                             setCurrentPage(1);
                                         }}
                                         className="w-full rounded-2xl border border-border bg-white pl-11 pr-4 py-3 text-sm appearance-none cursor-pointer focus:border-black/20 focus:outline-none"
@@ -333,7 +338,7 @@ export default function HistoryPage() {
                                                             </td>
                                                             <td className="px-6 py-4 text-right">
                                                                 <a 
-                                                                    href={`https://stellar.expert/explorer/public/tx/${tx.txHash}`} 
+                                                                    href={`https://stellar.expert/explorer/testnet/tx/${tx.txHash}`} 
                                                                     target="_blank" 
                                                                     rel="noopener noreferrer"
                                                                     className="inline-flex items-center gap-1.5 text-xs text-primary hover:text-primary-foreground hover:bg-primary px-2 py-1 rounded-lg transition-all group/link"
@@ -381,33 +386,43 @@ export default function HistoryPage() {
                                     </button>
                                     
                                     <div className="flex items-center gap-1.5">
-                                        {Array.from({ 
-                                            length: Math.min(totalPages, Math.max(1, Math.min(totalPages, currentPage + 2)) - Math.max(1, currentPage - 2) + 1)
-                                        }, (_, i) => {
-                                            const startPage = Math.max(1, currentPage - 2);
-                                            const endPage = Math.min(totalPages, startPage + 4);
-                                            const actualStartPage = endPage - startPage < 4 ? Math.max(1, endPage - 4) : startPage;
-                                            
-                                            // More robust sliding window calculation
-                                            const page = actualStartPage + i;
-                                            if (page > totalPages) return null;
-                                            
-                                            return (
-                                                <button 
-                                                    key={page}
-                                                    onClick={() => setCurrentPage(page)}
-                                                    className={cn(
-                                                        "h-8 w-8 rounded-xl text-xs font-medium transition-all",
-                                                        currentPage === page 
-                                                        ? "bg-brand-dark text-white shadow-md shadow-black/10" 
-                                                        : "bg-white border border-border text-foreground hover:border-black/20"
-                                                    )}
-                                                >
-                                                    {page}
-                                                </button>
-                                            );
-                                        })}
-                                        {totalPages > 5 && currentPage < totalPages - 2 && <span className="mx-1 text-muted-foreground">...</span>}
+                                        {(() => {
+                                            let pages: number[] = [];
+                                            if (totalPages <= 5) {
+                                                pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+                                            } else {
+                                                if (currentPage <= 3) {
+                                                    pages = [1, 2, 3, 4, totalPages];
+                                                } else if (currentPage >= totalPages - 2) {
+                                                    pages = [1, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+                                                } else {
+                                                    pages = [1, currentPage - 1, currentPage, currentPage + 1, totalPages];
+                                                }
+                                            }
+                                            return pages.map((page, index, array) => {
+                                                const isGap = index > 0 && page - array[index - 1] > 1;
+                                                return (
+                                                    <Fragment key={page}>
+                                                        {isGap && (
+                                                            <span className="mx-0.5 text-muted-foreground tracking-widest text-xs">
+                                                                ...
+                                                            </span>
+                                                        )}
+                                                        <button 
+                                                            onClick={() => setCurrentPage(page)}
+                                                            className={cn(
+                                                                "h-8 w-8 rounded-xl text-xs font-medium transition-all",
+                                                                currentPage === page 
+                                                                ? "bg-brand-dark text-white shadow-md shadow-black/10" 
+                                                                : "bg-white border border-border text-foreground hover:border-black/20"
+                                                            )}
+                                                        >
+                                                            {page}
+                                                        </button>
+                                                    </Fragment>
+                                                );
+                                            });
+                                        })()}
                                     </div>
 
                                     <button 
