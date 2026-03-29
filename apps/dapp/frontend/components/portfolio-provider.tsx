@@ -87,9 +87,9 @@ interface PortfolioState {
 }
 
 const defaultBalances = {
-    USDC: 10000,
-    USDT: 2500,
-    XLM: 850,
+    USDC: 0,
+    USDT: 0,
+    XLM: 0,
 };
 
 const PortfolioContext = createContext<PortfolioState | null>(null);
@@ -365,10 +365,6 @@ export function usePortfolio() {
         throw new Error("usePortfolio must be used within PortfolioProvider");
     }
     return context;
-}
-
-export function getExplorerUrl(txHash: string) {
-    return `https://stellar.expert/explorer/testnet/tx/${txHash}`;
 }
 
 export function getVaultForPosition(position: PortfolioPosition) {

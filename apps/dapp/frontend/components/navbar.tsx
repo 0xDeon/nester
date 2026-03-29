@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useWebSocketContext } from "@/components/websocket-provider";
 import { type WSConnectionStatus } from "@/lib/ws-events";
+import { NetworkSelector } from "@/components/network/NetworkSelector";
 
 // ---------------------------------------------------------------------------
 // WebSocket connection status indicator
@@ -120,6 +121,7 @@ export function Navbar() {
                                 <Link
                                     key={item.label}
                                     href={item.href}
+                                    data-tour={item.label === "Settlements" ? "settlements-tab" : undefined}
                                     className={cn(
                                         "text-[15px] font-medium transition-colors relative py-2",
                                         pathname === item.href
@@ -139,6 +141,7 @@ export function Navbar() {
                     <div className="flex items-center gap-3">
                         {isConnected && address ? (
                             <>
+                                <NetworkSelector />
                                 <WsStatusIndicator />
                                 <NotificationBell />
 
