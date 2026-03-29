@@ -96,7 +96,7 @@ func newAdminHandlerStubService(vaultID uuid.UUID) *adminHandlerStubService {
 				ID:             userID,
 				WalletAddress:  "GADMINWALLET",
 				DisplayName:    "Admin User",
-				KYCStatus:      user.KYCStatusApproved,
+				KYCStatus:      user.KYCStatusVerified,
 				VaultCount:     1,
 				TotalDeposited: decimal.RequireFromString("1000.00"),
 				CreatedAt:      now,
