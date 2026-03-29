@@ -79,7 +79,12 @@ impl NesterHarness {
         // Initialise in dependency order.
         TreasuryContractClient::new(&env, &treasury_id).initialize(&admin, &vault_id);
 
-        VaultContractClient::new(&env, &vault_id).initialize(&admin, &deposit_token_id, &treasury_id);
+        VaultContractClient::new(&env, &vault_id).initialize(
+            &admin,
+            &deposit_token_id,
+            &token_id,
+            &treasury_id,
+        );
 
         VaultTokenContractClient::new(&env, &token_id).initialize(
             &vault_id,
