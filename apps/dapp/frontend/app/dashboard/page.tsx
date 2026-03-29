@@ -20,6 +20,7 @@ import {
 } from "@/components/portfolio-provider";
 import { WithdrawModal } from "@/components/vault-action-modals";
 import { truncateAddress } from "@/lib/utils";
+import { GuidedTour } from "@/components/onboarding/GuidedTour";
 
 export default function Dashboard() {
     const { isConnected, address } = useWallet();
@@ -104,7 +105,7 @@ export default function Dashboard() {
                     </p>
                 </motion.div>
 
-                <div className="mb-8 grid grid-cols-2 gap-3 sm:mb-10 sm:gap-4 lg:grid-cols-4">
+                <div data-tour="portfolio-overview" className="mb-8 grid grid-cols-2 gap-3 sm:mb-10 sm:gap-4 lg:grid-cols-4">
                     {stats.map((stat, index) => (
                         <motion.div
                             key={stat.label}
@@ -136,6 +137,7 @@ export default function Dashboard() {
 
                 <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
                     <motion.div
+                        data-tour="vault-list"
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.5, delay: 0.4 }}
@@ -147,6 +149,7 @@ export default function Dashboard() {
                             </h2>
                             <Link
                                 href="/dashboard/vaults"
+                                data-tour="deposit-cta"
                                 className="flex min-h-11 items-center px-2 text-xs font-medium text-foreground/60 transition-colors hover:text-foreground"
                             >
                                 Add Deposit
@@ -329,6 +332,7 @@ export default function Dashboard() {
                 onClose={() => setSelectedPosition(null)}
                 position={selectedPosition}
             />
+            <GuidedTour />
         </div>
     );
 }

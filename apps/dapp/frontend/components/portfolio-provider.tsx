@@ -87,9 +87,9 @@ interface PortfolioState {
 }
 
 const defaultBalances = {
-    USDC: 10000,
-    USDT: 2500,
-    XLM: 850,
+    USDC: 0,
+    USDT: 0,
+    XLM: 0,
 };
 
 const PortfolioContext = createContext<PortfolioState | null>(null);

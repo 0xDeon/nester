@@ -120,6 +120,7 @@ export function Navbar() {
                                 <Link
                                     key={item.label}
                                     href={item.href}
+                                    data-tour={item.label === "Settlements" ? "settlements-tab" : undefined}
                                     className={cn(
                                         "text-[15px] font-medium transition-colors relative py-2",
                                         pathname === item.href

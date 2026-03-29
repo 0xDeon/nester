@@ -10,11 +10,13 @@ import "./globals.css";
 const spaceGrotesk = Space_Grotesk({
     subsets: ["latin"],
     variable: "--font-space-grotesk",
+    display: "swap",
 });
 
 const inter = Inter({
     subsets: ["latin"],
     variable: "--font-inter",
+    display: "swap",
 });
 
 const cormorant = Cormorant({
@@ -22,6 +24,7 @@ const cormorant = Cormorant({
     weight: ["300", "400"],
     style: ["normal", "italic"],
     variable: "--font-cormorant",
+    display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -35,6 +38,7 @@ export const metadata: Metadata = {
 };
 
 import { SettingsProvider } from "@/context/settings-context";
+import { OnboardingProvider } from "@/hooks/useOnboarding";
 
 export default function RootLayout({
     children,
@@ -52,8 +56,10 @@ export default function RootLayout({
                         <NotificationsProvider>
                             <PortfolioProvider>
                                 <WebSocketProvider>
-                                    {children}
-                                    <NotificationsToaster />
+                                    <OnboardingProvider>
+                                        {children}
+                                        <NotificationsToaster />
+                                    </OnboardingProvider>
                                 </WebSocketProvider>
                             </PortfolioProvider>
                         </NotificationsProvider>
