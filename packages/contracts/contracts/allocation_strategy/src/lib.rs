@@ -6,14 +6,7 @@ use soroban_sdk::{
 
 use nester_access_control::{AccessControl, Role};
 use nester_common::{emit_event, ContractError, SourceStatus, BASIS_POINT_SCALE};
-
-mod yield_registry_import {
-    use nester_common::{ProtocolType, SourceStatus};
-    soroban_sdk::contractimport!(
-        file = "../../../target/wasm32-unknown-unknown/release/yield_registry.wasm"
-    );
-}
-use yield_registry_import::{Client as RegistryClient, YieldSource as RegistrySource};
+use yield_registry::{YieldRegistryContractClient as RegistryClient, YieldSource as RegistrySource};
 
 const STRATEGY: Symbol = symbol_short!("STRATEGY");
 const WEIGHTS_UPDATED: Symbol = symbol_short!("WTS_SET");
