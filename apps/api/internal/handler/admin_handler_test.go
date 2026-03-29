@@ -313,21 +313,6 @@ func TestAdminHandlerAuthListPauseVerify(t *testing.T) {
 
 func makeAdminToken(t *testing.T, secret string, roles []string) string {
 	t.Helper()
-	tok, err := auth.MakeJWT(auth.Claims{
-		Subject:   "admin-user",
-		Roles:     roles,
-		ExpiresAt: time.Now().Add(time.Hour).Unix(),
-	})
-	if err != nil {
-		t.Fatalf("make token: %v", err)
-	}
-	parsed, err := auth.ParseJWT(tok, secret)
-	if err == nil && len(parsed.Roles) == 0 {
-		t.Fatal("parsed token unexpectedly lost roles")
-	}
-
-	// auth.MakeJWT currently signs using auth package default secret path.
-	// Re-sign explicitly with requested secret for middleware.Authenticate.
 	signed, err := auth.MakeJWT(auth.Claims{
 		Subject:   "admin-user",
 		Roles:     roles,
