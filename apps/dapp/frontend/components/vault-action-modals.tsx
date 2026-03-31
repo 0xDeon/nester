@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { validateAmount } from "@/lib/validation";
 import {
     AlertCircle,
     CheckCircle2,
@@ -108,7 +112,6 @@ export function DepositModal({
     const { currentNetwork } = useNetwork();
     const { address } = useWallet();
     const { getAvailableBalance, recordDeposit } = usePortfolio();
-    const [amountInput, setAmountInput] = useState("");
     const [state, setState] = useState<ActionState>("input");
     const [error, setError] = useState("");
     const [receipt, setReceipt] = useState<{
@@ -117,25 +120,56 @@ export function DepositModal({
         walletPopupUsed: boolean;
     } | null>(null);
 
-    const amount = Number(amountInput) || 0;
     const balance = getAvailableBalance(vault?.asset ?? "USDC");
-    const canSubmit = !!vault && !!address && amount > 0 && amount <= balance;
+
+    const formSchema = useMemo(() => z.object({
+        amount: validateAmount({
+            min: 0.000001,
+            balance: balance,
+            maxDecimals: 6,
+            minMessage: "Amount must be greater than 0",
+            balanceMessage: `Amount exceeds your balance of ${formatCurrency(balance)} USDC`
+        })
+    }), [balance]);
+
+    type FormValues = z.infer<typeof formSchema>;
+
+    const {
+        control,
+        handleSubmit,
+        watch,
+        formState: { errors, isValid, isDirty },
+        trigger,
+        reset: resetForm
+    } = useForm<FormValues>({
+        resolver: zodResolver(formSchema),
+        mode: "onBlur",
+        defaultValues: { amount: "" }
+    });
+
+    const amountInput = watch("amount");
+    const amount = Number(amountInput) || 0;
+    const [showLargeWarning, setShowLargeWarning] = useState(false);
+    
+    const canSubmit = !!vault && !!address && isValid && amount > 0;
     const estimatedYield = vault ? amount * vault.apy : 0;
     const sharesReceived = amount;
 
     const reset = () => {
-        setAmountInput("");
+        resetForm();
         setState("input");
         setError("");
         setReceipt(null);
+        setShowLargeWarning(false);
         onClose();
     };
 
-    const handleDeposit = async () => {
+    const processDeposit = async () => {
         if (!vault || !address || !canSubmit) return;
 
         setError("");
         setState("confirming");
+        setShowLargeWarning(false);
 
         try {
             const txXdr = await buildMockTransactionXdr(
@@ -165,6 +199,14 @@ export function DepositModal({
             setState("error");
         }
     };
+
+    const handleDeposit = handleSubmit(() => {
+        if (amount > 10000 && !showLargeWarning) {
+            setShowLargeWarning(true);
+            return;
+        }
+        processDeposit();
+    });
 
     return (
         <ModalShell
@@ -208,36 +250,65 @@ export function DepositModal({
                                 <label className="mb-2 block text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
                                     Deposit Amount
                                 </label>
-                                <div className="flex items-center gap-3 rounded-2xl border border-border bg-[#fafafa] px-4 py-4">
-                                    <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        value={amountInput}
-                                        onChange={(event) => {
-                                            const next = event.target.value;
-                                            if (/^\d*\.?\d*$/.test(next)) {
-                                                setAmountInput(next);
-                                                setState("input");
-                                            }
-                                        }}
-                                        placeholder="0.00"
-                                        className="min-w-0 flex-1 bg-transparent font-heading text-3xl font-light outline-none placeholder:text-muted-foreground/40"
-                                    />
-                                    <div className="flex items-center gap-2">
-                                        <span className="rounded-full bg-white px-3 py-2 text-sm font-medium text-foreground shadow-sm">
-                                            USDC
-                                        </span>
-                                        <button
-                                            onClick={() => setAmountInput(balance.toFixed(2))}
-                                            className="rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
-                                        >
-                                            Max
-                                        </button>
-                                    </div>
-                                </div>
-                                <p className="mt-2 text-xs text-muted-foreground">
-                                    Available from connected wallet: {formatCurrency(balance)} USDC
-                                </p>
+                                <Controller
+                                    name="amount"
+                                    control={control}
+                                    render={({ field: { onChange, onBlur, value } }) => (
+                                        <>
+                                            <div className={cn(
+                                                "flex items-center gap-3 rounded-2xl border bg-[#fafafa] px-4 py-4",
+                                                errors.amount ? "border-red-500" : "border-border"
+                                            )}>
+                                                <input
+                                                    type="text"
+                                                    inputMode="decimal"
+                                                    value={value}
+                                                    onChange={(event) => {
+                                                        const next = event.target.value;
+                                                        if (/^\d*\.?\d*$/.test(next)) {
+                                                            onChange(next);
+                                                            if (isDirty) trigger("amount");
+                                                            setState("input");
+                                                            setShowLargeWarning(false);
+                                                        }
+                                                    }}
+                                                    onBlur={onBlur}
+                                                    onPaste={() => setTimeout(() => trigger("amount"), 0)}
+                                                    placeholder="0.00"
+                                                    className={cn(
+                                                        "min-w-0 flex-1 bg-transparent font-heading text-3xl font-light outline-none placeholder:text-muted-foreground/40",
+                                                        errors.amount && "text-red-500"
+                                                    )}
+                                                />
+                                                <div className="flex items-center gap-2">
+                                                    <span className="rounded-full bg-white px-3 py-2 text-sm font-medium text-foreground shadow-sm">
+                                                        USDC
+                                                    </span>
+                                                    <button
+                                                        onClick={() => {
+                                                            onChange(balance.toFixed(2));
+                                                            trigger("amount");
+                                                            setShowLargeWarning(false);
+                                                        }}
+                                                        className="rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
+                                                    >
+                                                        Max
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-between mt-2">
+                                                {errors.amount ? (
+                                                    <span className="text-xs text-red-500 font-medium">{errors.amount.message}</span>
+                                                ) : (
+                                                    <span></span>
+                                                )}
+                                                <p className="text-xs text-muted-foreground">
+                                                    Available from connected wallet: {formatCurrency(balance)} USDC
+                                                </p>
+                                            </div>
+                                        </>
+                                    )}
+                                />
                             </div>
 
                             <div className="mt-6 space-y-3 rounded-2xl border border-border bg-secondary/30 p-4">
@@ -380,6 +451,17 @@ export function DepositModal({
                                 </div>
                             )}
 
+                            {showLargeWarning && (
+                                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                                    <div className="flex items-start gap-2">
+                                        <AlertCircle className="mt-0.5 h-4 w-4" />
+                                        <span>
+                                            You&apos;re about to deposit ${formatCurrency(amount)} — are you sure?
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="mt-5 flex gap-3">
                                 <button
                                     onClick={reset}
@@ -406,7 +488,7 @@ export function DepositModal({
                                             </span>
                                         )}
                                         {(state === "input" || state === "error") &&
-                                            "Confirm Deposit"}
+                                            (showLargeWarning ? "Yes, confirm deposit" : "Confirm Deposit")}
                                     </button>
                                 )}
                             </div>
@@ -430,7 +512,35 @@ export function WithdrawModal({
     const { currentNetwork } = useNetwork();
     const { address } = useWallet();
     const { getWithdrawalQuote, recordWithdrawal } = usePortfolio();
-    const [amountInput, setAmountInput] = useState("");
+
+    const formSchema = useMemo(() => z.object({
+        amount: validateAmount({
+            min: 0.000001,
+            balance: position?.currentValue || 0,
+            maxDecimals: 6,
+            minMessage: "Amount must be greater than 0",
+            balanceMessage: `Amount exceeds your owned shares of ${formatCurrency(position?.currentValue || 0)}`
+        })
+    }), [position?.currentValue]);
+
+    type FormValues = z.infer<typeof formSchema>;
+
+    const {
+        control,
+        handleSubmit,
+        watch,
+        formState: { errors, isValid, isDirty },
+        trigger,
+        reset: resetForm
+    } = useForm<FormValues>({
+        resolver: zodResolver(formSchema),
+        mode: "onBlur",
+        defaultValues: { amount: "" }
+    });
+
+    const amountInput = watch("amount");
+    const amount = Number(amountInput) || 0;
+    const [showLargeWarning, setShowLargeWarning] = useState(false);
     const [state, setState] = useState<ActionState>("input");
     const [error, setError] = useState("");
     const [receipt, setReceipt] = useState<{
@@ -441,7 +551,6 @@ export function WithdrawModal({
         netAmount: number;
     } | null>(null);
 
-    const amount = Number(amountInput) || 0;
     const quote = useMemo(
         () => (position ? getWithdrawalQuote(position.id, amount) : null),
         [amount, getWithdrawalQuote, position]
@@ -450,23 +559,25 @@ export function WithdrawModal({
     const canSubmit =
         !!position &&
         !!address &&
+        isValid &&
         amount > 0 &&
-        amount <= position.currentValue &&
         !!quote;
 
     const reset = () => {
-        setAmountInput("");
+        resetForm();
         setState("input");
         setError("");
         setReceipt(null);
+        setShowLargeWarning(false);
         onClose();
     };
 
-    const handleWithdraw = async () => {
-        if (!position || !address || !quote) return;
+    const processWithdrawal = async () => {
+        if (!position || !address || !quote || !canSubmit) return;
 
         setError("");
         setState("confirming");
+        setShowLargeWarning(false);
 
         try {
             const txXdr = await buildMockTransactionXdr(
@@ -501,6 +612,14 @@ export function WithdrawModal({
             setState("error");
         }
     };
+
+    const handleWithdraw = handleSubmit(() => {
+        if (amount > 10000 && !showLargeWarning) {
+            setShowLargeWarning(true);
+            return;
+        }
+        processWithdrawal();
+    });
 
     return (
         <ModalShell
@@ -576,35 +695,58 @@ export function WithdrawModal({
                                     <label className="mb-2 block text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
                                         Withdrawal Amount
                                     </label>
-                                    <div className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-4">
-                                        <input
-                                            type="text"
-                                            inputMode="decimal"
-                                            value={amountInput}
-                                            onChange={(event) => {
-                                                const next = event.target.value;
-                                                if (/^\d*\.?\d*$/.test(next)) {
-                                                    setAmountInput(next);
-                                                    setState("input");
-                                                }
-                                            }}
-                                            placeholder="0.00"
-                                            className="min-w-0 flex-1 bg-transparent font-heading text-3xl font-light outline-none placeholder:text-muted-foreground/40"
-                                        />
-                                        <div className="flex items-center gap-2">
-                                            <span className="rounded-full bg-secondary px-3 py-2 text-sm font-medium text-foreground">
-                                                USDC
-                                            </span>
-                                            <button
-                                                onClick={() =>
-                                                    setAmountInput(position.currentValue.toFixed(2))
-                                                }
-                                                className="rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
-                                            >
-                                                Max
-                                            </button>
-                                        </div>
-                                    </div>
+                                    <Controller
+                                        name="amount"
+                                        control={control}
+                                        render={({ field: { onChange, onBlur, value } }) => (
+                                            <>
+                                                <div className={cn(
+                                                    "flex items-center gap-3 rounded-2xl border bg-white px-4 py-4",
+                                                    errors.amount ? "border-red-500" : "border-border"
+                                                )}>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={value}
+                                                        onChange={(event) => {
+                                                            const next = event.target.value;
+                                                            if (/^\d*\.?\d*$/.test(next)) {
+                                                                onChange(next);
+                                                                if (isDirty) trigger("amount");
+                                                                setState("input");
+                                                                setShowLargeWarning(false);
+                                                            }
+                                                        }}
+                                                        onBlur={onBlur}
+                                                        onPaste={() => setTimeout(() => trigger("amount"), 0)}
+                                                        placeholder="0.00"
+                                                        className={cn(
+                                                            "min-w-0 flex-1 bg-transparent font-heading text-3xl font-light outline-none placeholder:text-muted-foreground/40",
+                                                            errors.amount && "text-red-500"
+                                                        )}
+                                                    />
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="rounded-full bg-secondary px-3 py-2 text-sm font-medium text-foreground">
+                                                            USDC
+                                                        </span>
+                                                        <button
+                                                            onClick={() => {
+                                                                onChange(position.currentValue.toFixed(2));
+                                                                trigger("amount");
+                                                                setShowLargeWarning(false);
+                                                            }}
+                                                            className="rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
+                                                        >
+                                                            Max
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {errors.amount && (
+                                                    <span className="text-xs text-red-500 font-medium mt-2 block">{errors.amount.message}</span>
+                                                )}
+                                            </>
+                                        )}
+                                    />
                                 </div>
 
                                 <div className="mt-4 space-y-3">
@@ -720,6 +862,17 @@ export function WithdrawModal({
                                 </div>
                             )}
 
+                            {showLargeWarning && (
+                                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                                    <div className="flex items-start gap-2">
+                                        <AlertCircle className="mt-0.5 h-4 w-4" />
+                                        <span>
+                                            You&apos;re about to withdraw ${formatCurrency(amount)} — are you sure?
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="mt-5 flex gap-3">
                                 <button
                                     onClick={reset}
@@ -746,7 +899,7 @@ export function WithdrawModal({
                                             </span>
                                         )}
                                         {(state === "input" || state === "error") &&
-                                            "Confirm Withdrawal"}
+                                            (showLargeWarning ? "Yes, confirm withdrawal" : "Confirm Withdrawal")}
                                     </button>
                                 )}
                             </div>

@@ -209,7 +209,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             manualReconnect,
         }),
         // WS_URL is a module-level constant — intentionally excluded from deps.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+         
         [status, isConnected, lastEvent, subscribe, unsubscribe, disconnect, manualReconnect]
     );
 

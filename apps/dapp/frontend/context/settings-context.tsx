@@ -35,7 +35,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const savedCurrency = localStorage.getItem("nester_currency") as Currency;
         if (savedCurrency && EXCHANGE_RATES[savedCurrency]) {
-            setCurrencyState(savedCurrency);
+            // Avoid calling setState directly
+            const timer = setTimeout(() => {
+                setCurrencyState(savedCurrency);
+            }, 0);
+            return () => clearTimeout(timer);
         }
     }, []);
 

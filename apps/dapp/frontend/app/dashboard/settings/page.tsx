@@ -3,7 +3,7 @@
 import { useWallet } from "@/components/wallet-provider";
 import { Navbar } from "@/components/navbar";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import {
@@ -290,7 +290,15 @@ export default function SettingsPage() {
 }
 
 // Sub-components
-function SettingsSection({ title, icon: Icon, children, delay = 0, className }: any) {
+interface SettingsSectionProps {
+    title: string;
+    icon: React.ElementType;
+    children: React.ReactNode;
+    delay?: number;
+    className?: string;
+}
+
+function SettingsSection({ title, icon: Icon, children, delay = 0, className }: SettingsSectionProps) {
     return (
         <motion.section
             initial={{ opacity: 0, y: 20 }}
@@ -309,7 +317,15 @@ function SettingsSection({ title, icon: Icon, children, delay = 0, className }: 
     );
 }
 
-function ToggleItem({ label, description, active, onToggle, highlight }: any) {
+interface ToggleItemProps {
+    label: string;
+    description: string;
+    active: boolean;
+    onToggle: () => void;
+    highlight?: boolean;
+}
+
+function ToggleItem({ label, description, active, onToggle, highlight }: ToggleItemProps) {
     return (
         <div
             onClick={onToggle}
@@ -341,7 +357,14 @@ function ToggleItem({ label, description, active, onToggle, highlight }: any) {
     );
 }
 
-function SessionItem({ icon: Icon, device, status, current }: any) {
+interface SessionItemProps {
+    icon: React.ElementType;
+    device: string;
+    status: string;
+    current?: boolean;
+}
+
+function SessionItem({ icon: Icon, device, status, current }: SessionItemProps) {
     return (
         <div className="flex items-center justify-between p-3.5 rounded-xl border border-border/60 bg-white hover:border-black/15 transition-all group cursor-default">
             <div className="flex items-center gap-4">

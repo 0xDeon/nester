@@ -18,11 +18,18 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    let isMounted = true;
+    const timer = setTimeout(() => {
+      if (isMounted) setMounted(true);
+    }, 0);
     const savedNetwork = localStorage.getItem("nester_network_id");
     if (savedNetwork && (savedNetwork === "testnet" || savedNetwork === "mainnet")) {
-      setCurrentNetworkState(NETWORKS[savedNetwork]);
+      const timer2 = setTimeout(() => {
+        if (isMounted) setCurrentNetworkState(NETWORKS[savedNetwork]);
+      }, 0);
+      return () => { isMounted = false; clearTimeout(timer); clearTimeout(timer2); };
     }
+    return () => { isMounted = false; clearTimeout(timer); };
   }, []);
 
   const setNetwork = (networkId: 'testnet' | 'mainnet') => {

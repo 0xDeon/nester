@@ -6,6 +6,10 @@ import { useNotifications } from "@/components/notifications-provider";
 import { Navbar } from "@/components/navbar";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { validateAmount, validateBankAccount } from "@/lib/validation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import {
@@ -20,6 +24,7 @@ import {
     Loader2,
     CheckCircle2,
     ArrowRight,
+    AlertCircle,
 } from "lucide-react";
 
 import { BANKS, type LPNode, LP_NODES } from "@/lib/settlement-data";
@@ -87,16 +92,50 @@ function buildQuotes(
     return results;
 }
 
+const MOCK_BALANCE = 5000;
+
+const formSchema = z.object({
+    amount: validateAmount({
+        min: 1,
+        balance: MOCK_BALANCE,
+        maxDecimals: 6,
+        minMessage: "Minimum amount is 1 USDC",
+        balanceMessage: `Amount exceeds your balance of ${MOCK_BALANCE.toLocaleString()} USDC`
+    }),
+    accountNumber: validateBankAccount(),
+    bankCode: z.string({ message: "Please select a bank" }).min(1, "Please select a bank"),
+});
+
+type FormValues = z.infer<typeof formSchema>;
+
 export default function SettlementsPage() {
     const { isConnected } = useWallet();
     const { addNotification } = useNotifications();
     const router = useRouter();
 
-    const [sendAmount, setSendAmount] = useState("");
+    const {
+        handleSubmit,
+        watch,
+        control,
+        formState: { errors, isValid, isDirty },
+        trigger,
+    } = useForm<FormValues>({
+        resolver: zodResolver(formSchema),
+        mode: "onBlur",
+        defaultValues: {
+            amount: "",
+            accountNumber: "",
+            bankCode: "",
+        },
+    });
+
+    const sendAmount = watch("amount");
+    const accountNumber = watch("accountNumber");
+    const selectedBankCode = watch("bankCode");
+
     const [sendAsset, setSendAsset] = useState(SEND_ASSETS[0]);
     const [receiveCurrency, setReceiveCurrency] = useState(RECEIVE_CURRENCIES[0]);
-    const [selectedBank, setSelectedBank] = useState<typeof BANKS[0] | null>(null);
-    const [accountNumber, setAccountNumber] = useState("");
+    const selectedBank = BANKS.find(b => b.code === selectedBankCode) || null;
     const [showBankDropdown, setShowBankDropdown] = useState(false);
     const [showSendDropdown, setShowSendDropdown] = useState(false);
     const [showReceiveDropdown, setShowReceiveDropdown] = useState(false);
@@ -105,6 +144,7 @@ export default function SettlementsPage() {
     const [scannedCount, setScannedCount] = useState(0);
     const [quotes, setQuotes] = useState<QuoteResult[]>([]);
     const [selectedQuote, setSelectedQuote] = useState<QuoteResult | null>(null);
+    const [showLargeWarning, setShowLargeWarning] = useState(false);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -115,8 +155,7 @@ export default function SettlementsPage() {
     }, [isConnected, router]);
 
     const numericAmount = parseFloat(sendAmount) || 0;
-    const allFieldsFilled =
-        numericAmount > 0 && selectedBank !== null && accountNumber.length === 10;
+    const allFieldsFilled = isValid;
 
     const runQuoteScan = useCallback(
         (amount: number, bank: typeof BANKS[0], currency: typeof RECEIVE_CURRENCIES[0]) => {
@@ -196,24 +235,30 @@ export default function SettlementsPage() {
             ? numericAmount * receiveCurrency.rate * 0.995
             : 0;
 
-    const handleWithdraw = () => {
-        if (!allFieldsFilled || quotePhase !== "done" || !selectedQuote) {
+    const handleWithdraw = handleSubmit((data) => {
+        if (!isValid || quotePhase !== "done" || !selectedQuote) {
             return;
         }
 
+        if (numericAmount > 10000 && !showLargeWarning) {
+            setShowLargeWarning(true);
+            return;
+        }
+
+        setShowLargeWarning(false);
         addNotification(
             {
                 type: "withdrawal_processed",
                 title: "Withdrawal Submitted",
                 message: `Withdrew ${numericAmount.toLocaleString("en-US", {
                     maximumFractionDigits: 2,
-                })} ${sendAsset.symbol} to ${selectedBank?.name} ending in ${accountNumber.slice(-4)}.`,
+                })} ${sendAsset.symbol} to ${selectedBank?.name} ending in ${data.accountNumber.slice(-4)}.`,
                 actionUrl: getExplorerTxUrl(`mock-settlement-${selectedQuote.node.id}`),
                 actionLabel: "View Transaction",
             },
             { showToast: true }
         );
-    };
+    });
 
     return (
         <div className="min-h-screen bg-background">
@@ -245,23 +290,43 @@ export default function SettlementsPage() {
                         <label className="text-xs text-muted-foreground font-medium mb-2 block">
                             You&apos;ll send
                         </label>
-                        <div className="flex items-center gap-3">
-                            <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="0.00"
-                                value={sendAmount}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (/^\d*\.?\d*$/.test(val)) setSendAmount(val);
-                                }}
-                                className="flex-1 text-2xl sm:text-3xl font-heading font-light text-foreground bg-transparent outline-none placeholder:text-muted-foreground/40 min-w-0 min-h-[44px]"
-                            />
-                            <div className="relative">
-                                <button
-                                    onClick={() => setShowSendDropdown(!showSendDropdown)}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px]"
-                                >
+                        <div className="flex flex-col gap-1">
+                            <div className={cn(
+                                "flex items-center gap-3 rounded-2xl border px-3 py-2 transition-colors",
+                                errors.amount ? "border-red-500 bg-red-50/30" : "border-transparent bg-transparent hover:border-border"
+                            )}>
+                                <Controller
+                                    name="amount"
+                                    control={control}
+                                    render={({ field: { onChange, onBlur, value } }) => (
+                                        <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            placeholder="0.00"
+                                            value={value}
+                                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                                const val = e.target.value;
+                                                if (/^\d*\.?\d*$/.test(val)) {
+                                                    onChange(val);
+                                                    if (isDirty) trigger("amount");
+                                                }
+                                            }}
+                                            onBlur={onBlur}
+                                            onPaste={() => {
+                                                setTimeout(() => { trigger("amount"); }, 0);
+                                            }}
+                                            className={cn(
+                                                "flex-1 text-2xl sm:text-3xl font-heading font-light text-foreground bg-transparent outline-none placeholder:text-muted-foreground/40 min-w-0 min-h-[44px]",
+                                                errors.amount && "text-red-500"
+                                            )}
+                                        />
+                                    )}
+                                />
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setShowSendDropdown(!showSendDropdown)}
+                                        className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px]"
+                                    >
                                     <Image
                                         src={sendAsset.image}
                                         alt={sendAsset.symbol}
@@ -302,12 +367,20 @@ export default function SettlementsPage() {
                                 )}
                             </div>
                         </div>
-                        <div className="mt-2 text-xs text-muted-foreground">
-                            Balance: 0.00 {sendAsset.symbol}
+                        <div className="flex justify-between mt-2 px-1">
+                            {errors.amount ? (
+                                <span className="text-xs text-red-500 font-medium">{errors.amount.message}</span>
+                            ) : (
+                                <span></span>
+                            )}
+                            <div className="text-xs text-muted-foreground">
+                                Balance: {MOCK_BALANCE.toLocaleString()} {sendAsset.symbol}
+                            </div>
                         </div>
                     </div>
+                </div>
 
-                    {/* Swap Divider */}
+                {/* Swap Divider */}
                     <div className="relative px-4 sm:px-5">
                         <div className="border-t border-border" />
                         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -393,54 +466,95 @@ export default function SettlementsPage() {
                             <label className="text-xs text-muted-foreground font-medium mb-2 block">
                                 Select bank
                             </label>
-                            <button
-                                onClick={() => setShowBankDropdown(!showBankDropdown)}
-                                className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-border hover:border-foreground/20 transition-colors bg-white min-h-[52px]"
-                            >
-                                <span
-                                    className={
-                                        selectedBank
-                                            ? "text-sm font-medium text-foreground"
-                                            : "text-sm text-muted-foreground"
-                                    }
-                                >
-                                    {selectedBank ? selectedBank.name : "Choose your bank"}
-                                </span>
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                            </button>
-                            {showBankDropdown && (
-                                <div className="absolute left-0 right-0 top-full mt-1 rounded-xl border border-border bg-white shadow-lg py-1 z-10 max-h-56 overflow-y-auto">
-                                    {BANKS.map((bank) => (
-                                        <button
-                                            key={bank.code}
-                                            onClick={() => {
-                                                setSelectedBank(bank);
-                                                setShowBankDropdown(false);
-                                            }}
-                                            className="w-full text-left px-4 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[48px]"
-                                        >
-                                            {bank.name}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
+                            <Controller
+                                name="bankCode"
+                                control={control}
+                                render={({ field: { onChange, value } }) => {
+                                    const currentBank = BANKS.find((b) => b.code === value);
+                                    return (
+                                        <>
+                                            <button
+                                                onClick={() => setShowBankDropdown(!showBankDropdown)}
+                                                className={cn(
+                                                    "w-full flex items-center justify-between px-4 py-3 rounded-xl border border-border hover:border-foreground/20 transition-colors bg-white min-h-[52px]",
+                                                    errors.bankCode && "border-red-500 focus:border-red-500"
+                                                )}
+                                            >
+                                                <span
+                                                    className={
+                                                        currentBank
+                                                            ? "text-sm font-medium text-foreground"
+                                                            : "text-sm text-muted-foreground"
+                                                    }
+                                                >
+                                                    {currentBank ? currentBank.name : "Choose your bank"}
+                                                </span>
+                                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                            </button>
+                                            {showBankDropdown && (
+                                                <div className="absolute left-0 right-0 top-full mt-1 rounded-xl border border-border bg-white shadow-lg py-1 z-20 max-h-56 overflow-y-auto">
+                                                    {BANKS.map((bank) => (
+                                                        <button
+                                                            key={bank.code}
+                                                            onClick={() => {
+                                                                onChange(bank.code);
+                                                                setShowBankDropdown(false);
+                                                                trigger("bankCode");
+                                                            }}
+                                                            className="w-full text-left px-4 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[48px]"
+                                                        >
+                                                            {bank.name}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {errors.bankCode && (
+                                                <span className="text-xs text-red-500 font-medium mt-1 block">
+                                                    {errors.bankCode.message}
+                                                </span>
+                                            )}
+                                        </>
+                                    );
+                                }}
+                            />
                         </div>
 
                         <div>
                             <label className="text-xs text-muted-foreground font-medium mb-2 block">
                                 Account number
                             </label>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                maxLength={10}
-                                placeholder="Enter 10-digit account number"
-                                value={accountNumber}
-                                onChange={(e) => {
-                                    const val = e.target.value.replace(/\D/g, "");
-                                    setAccountNumber(val);
-                                }}
-                                className="w-full px-4 py-3 rounded-xl border border-border bg-white text-sm text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-foreground/20 transition-colors min-h-[52px]"
+                            <Controller
+                                name="accountNumber"
+                                control={control}
+                                render={({ field: { onChange, onBlur, value } }) => (
+                                    <>
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={10}
+                                            placeholder="Enter 10-digit account number"
+                                            value={value}
+                                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                                const val = e.target.value.replace(/\D/g, "");
+                                                onChange(val);
+                                                if (isDirty) trigger("accountNumber");
+                                            }}
+                                            onBlur={onBlur}
+                                            onPaste={() => {
+                                                setTimeout(() => { trigger("accountNumber"); }, 0);
+                                            }}
+                                            className={cn(
+                                                "w-full px-4 py-3 rounded-xl border border-border bg-white text-sm text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-foreground/20 transition-colors min-h-[52px]",
+                                                errors.accountNumber && "border-red-500 focus:border-red-500"
+                                            )}
+                                        />
+                                        {errors.accountNumber && (
+                                            <span className="text-xs text-red-500 font-medium mt-1 block">
+                                                {errors.accountNumber.message}
+                                            </span>
+                                        )}
+                                    </>
+                                )}
                             />
                         </div>
                     </div>
@@ -485,10 +599,22 @@ export default function SettlementsPage() {
                         </div>
                     )}
 
+                    {/* Large amount warning */}
+                    {showLargeWarning && (
+                        <div className="mx-4 sm:mx-5 mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                            <div className="flex items-start gap-2">
+                                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                <span>
+                                    You&apos;re about to withdraw ${numericAmount.toLocaleString("en-US", { maximumFractionDigits: 2 })} — are you sure?
+                                </span>
+                            </div>
+                        </div>
+                    )}
+
                     {/* CTA Button */}
                     <div className="p-4 sm:p-5 pt-0">
                         <button
-                            disabled={!allFieldsFilled || quotePhase !== "done"}
+                            disabled={!isValid || quotePhase !== "done"}
                             onClick={handleWithdraw}
                             className="w-full rounded-xl bg-foreground text-background py-4 text-sm font-medium transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
@@ -496,11 +622,13 @@ export default function SettlementsPage() {
                                 ? "Enter an amount"
                                 : !selectedBank
                                     ? "Select a bank"
-                                    : accountNumber.length !== 10
+                                    : (accountNumber?.length || 0) !== 10
                                         ? "Enter account number"
                                         : quotePhase !== "done"
                                             ? "Finding best rate..."
-                                            : `Withdraw ${displayReceive.toLocaleString("en-US", { minimumFractionDigits: 2 })} ${receiveCurrency.symbol}`}
+                                            : showLargeWarning
+                                                ? "Yes, confirm withdrawal"
+                                                : `Withdraw ${displayReceive.toLocaleString("en-US", { minimumFractionDigits: 2 })} ${receiveCurrency.symbol}`}
                         </button>
                     </div>
                 </motion.div>

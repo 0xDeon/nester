@@ -94,8 +94,8 @@ export function PortfolioCharts({ positions }: PortfolioChartsProps) {
                                 ))}
                             </Pie>
                             <Tooltip 
-                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', fontSize: '11px' }}
-                                formatter={(value: any) => formatValue(Number(value) / exchangeRate)}
+                                contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.08)", fontSize: "11px" }}
+                                formatter={(value) => formatValue(Number(value) / exchangeRate)}
                             />
                         </PieChart>
                     </ResponsiveContainer>
@@ -173,7 +173,7 @@ export function PortfolioCharts({ positions }: PortfolioChartsProps) {
                                 labelStyle={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '4px' }}
                                 itemStyle={{ fontSize: '11px' }}
                                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
-                                formatter={(value: any) => formatValue(Number(value) / exchangeRate)}
+                                formatter={(value) => formatValue(Number(value) / exchangeRate)}
                             />
                             <Legend 
                                 verticalAlign="top" 
