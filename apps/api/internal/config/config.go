@@ -42,6 +42,7 @@ type StellarConfig struct {
 	networkPassphrase string
 	rpcURL            string
 	horizonURL        string
+	operatorSecret    string
 }
 
 type AuthConfig struct {
@@ -96,6 +97,7 @@ func Load() (*Config, error) {
 			networkPassphrase: loader.requiredString("STELLAR_NETWORK_PASSPHRASE"),
 			rpcURL:            loader.requiredURL("STELLAR_RPC_URL"),
 			horizonURL:        loader.requiredURL("STELLAR_HORIZON_URL"),
+			operatorSecret:    loader.stringDefault("STELLAR_OPERATOR_SECRET", ""),
 		},
 		settlementProviderURL: loader.stringDefault("SETTLEMENT_PROVIDER_URL", ""),
 		auth: AuthConfig{
@@ -268,6 +270,10 @@ func (s StellarConfig) RPCURL() string {
 
 func (s StellarConfig) HorizonURL() string {
 	return s.horizonURL
+}
+
+func (s StellarConfig) OperatorSecret() string {
+	return s.operatorSecret
 }
 
 func (l LogConfig) Level() string {

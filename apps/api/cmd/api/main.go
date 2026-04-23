@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -62,9 +63,24 @@ func run() error {
 	userHandler := handler.NewUserHandler(userService)
 
 	adminRepository := postgres.NewAdminRepository(db)
+
+	var chainInvoker service.VaultChainInvoker
+	if secret := cfg.Stellar().OperatorSecret(); secret != "" {
+		inv, err := service.NewSorobanVaultChainInvoker(
+			cfg.Stellar().RPCURL(),
+			cfg.Stellar().HorizonURL(),
+			cfg.Stellar().NetworkPassphrase(),
+			secret,
+		)
+		if err != nil {
+			return fmt.Errorf("init chain invoker: %w", err)
+		}
+		chainInvoker = inv
+	}
+
 	adminService := service.NewAdminService(
 		adminRepository,
-		nil,
+		chainInvoker,
 		cfg.Stellar().HorizonURL(),
 		cfg.SettlementProviderURL(),
 	)
