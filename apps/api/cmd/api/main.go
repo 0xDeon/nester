@@ -16,6 +16,7 @@ import (
 	"github.com/suncrestlabs/nester/apps/api/internal/config"
 	"github.com/suncrestlabs/nester/apps/api/internal/handler"
 	"github.com/suncrestlabs/nester/apps/api/internal/middleware"
+	"github.com/suncrestlabs/nester/apps/api/internal/oracle"
 	"github.com/suncrestlabs/nester/apps/api/internal/repository"
 	"github.com/suncrestlabs/nester/apps/api/internal/repository/postgres"
 	"github.com/suncrestlabs/nester/apps/api/internal/service"
@@ -99,6 +100,9 @@ func run() error {
 	authService := service.NewAuthService(challengeStore, userService, cfg.Auth())
 	authHandler := handler.NewAuthHandler(authService)
 
+	oracleService := oracle.NewRateService(cfg.Stellar().HorizonURL())
+	rateHandler := handler.NewRateHandler(oracleService)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler(pgPool, cfg.Database().ConnectionTimeout()))
 	mux.HandleFunc("GET /healthz", healthHandler(pgPool, cfg.Database().ConnectionTimeout()))
@@ -108,6 +112,7 @@ func run() error {
 	userHandler.Register(mux)
 	adminHandler.Register(mux)
 	authHandler.Register(mux)
+	rateHandler.Register(mux)
 
 	authRules := []middleware.RouteRule{
 		{PathPrefix: "/health", Public: true},
