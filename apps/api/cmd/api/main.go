@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/suncrestlabs/nester/apps/api/internal/config"
 	"github.com/suncrestlabs/nester/apps/api/internal/handler"
@@ -86,7 +87,16 @@ func run() error {
 	)
 	adminHandler := handler.NewAdminHandler(adminService)
 
-	authService := service.NewAuthService(userService, cfg.Auth())
+	var challengeStore service.ChallengeStore
+	if addr := cfg.Redis().Addr(); addr != "" {
+		redisClient := redis.NewClient(&redis.Options{Addr: addr})
+		challengeStore = service.NewRedisChallengeStore(redisClient, cfg.Auth().ChallengeExpiry())
+		baseLogger.Info("challenge store: redis", "addr", addr)
+	} else {
+		challengeStore = service.NewInMemoryChallengeStore(cfg.Auth().ChallengeExpiry())
+		baseLogger.Info("challenge store: in-memory (single-instance only)")
+	}
+	authService := service.NewAuthService(challengeStore, userService, cfg.Auth())
 	authHandler := handler.NewAuthHandler(authService)
 
 	mux := http.NewServeMux()

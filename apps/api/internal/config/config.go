@@ -18,6 +18,7 @@ type Config struct {
 	server                ServerConfig
 	database              DatabaseConfig
 	stellar               StellarConfig
+	redis                 RedisConfig
 	settlementProviderURL string
 	auth                  AuthConfig
 	rateLimit             RateLimitConfig
@@ -63,6 +64,10 @@ type LogConfig struct {
 	format string
 }
 
+type RedisConfig struct {
+	addr string
+}
+
 func Load() (*Config, error) {
 	fileValues, err := loadDotEnvFile(".env")
 	if err != nil {
@@ -98,6 +103,9 @@ func Load() (*Config, error) {
 			rpcURL:            loader.requiredURL("STELLAR_RPC_URL"),
 			horizonURL:        loader.requiredURL("STELLAR_HORIZON_URL"),
 			operatorSecret:    loader.stringDefault("STELLAR_OPERATOR_SECRET", ""),
+		},
+		redis: RedisConfig{
+			addr: loader.stringDefault("REDIS_ADDR", ""),
 		},
 		settlementProviderURL: loader.stringDefault("SETTLEMENT_PROVIDER_URL", ""),
 		auth: AuthConfig{
@@ -156,6 +164,14 @@ func (c Config) RateLimit() RateLimitConfig {
 
 func (c Config) Log() LogConfig {
 	return c.log
+}
+
+func (c Config) Redis() RedisConfig {
+	return c.redis
+}
+
+func (r RedisConfig) Addr() string {
+	return r.addr
 }
 
 func (c *Config) validate(loader *envLoader) {

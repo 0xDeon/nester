@@ -1,4 +1,14 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   postgres:
     image: postgres:16-alpine
     ports:
@@ -25,6 +35,7 @@ services:
     environment:
       APP_ENV: development
       DATABASE_DSN: postgres://nester:nester_dev_password@postgres:5432/nester_dev?sslmode=disable
+      REDIS_ADDR: redis:6379
       STELLAR_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015"
       STELLAR_RPC_URL: https://soroban-testnet.stellar.org
       STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
@@ -32,6 +43,8 @@ services:
       LOG_FORMAT: text
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - ./apps/api:/app
