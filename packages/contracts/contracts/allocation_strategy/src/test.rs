@@ -26,9 +26,7 @@ fn reg(
     );
 }
 
-fn setup_with_type(
-    vault_type: VaultType,
-) -> (Env, Address, Address, Address) {
+fn setup_with_type(vault_type: VaultType) -> (Env, Address, Address, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -42,8 +40,11 @@ fn setup_with_type(
     reg(&registry, &env, &admin, symbol_short!("blend"));
     reg(&registry, &env, &admin, symbol_short!("comp"));
 
-    AllocationStrategyContractClient::new(&env, &strategy_id)
-        .initialize_with_vault_type(&admin, &registry_id, &vault_type);
+    AllocationStrategyContractClient::new(&env, &strategy_id).initialize_with_vault_type(
+        &admin,
+        &registry_id,
+        &vault_type,
+    );
 
     (env, admin, registry_id, strategy_id)
 }
@@ -325,21 +326,21 @@ fn compute_allocation_preserves_weight_and_amount_invariants() {
     for total in [1_i128, 7_i128, 101_i128, 10_001_i128] {
         let weights = client.compute_allocation(
             &total,
-        &vec![
-            &env,
+            &vec![
+                &env,
                 SourceApy {
-                source_id: symbol_short!("aave"),
+                    source_id: symbol_short!("aave"),
                     apy_bps: 150,
-            },
+                },
                 SourceApy {
-                source_id: symbol_short!("blend"),
+                    source_id: symbol_short!("blend"),
                     apy_bps: 300,
-            },
+                },
                 SourceApy {
-                source_id: symbol_short!("comp"),
+                    source_id: symbol_short!("comp"),
                     apy_bps: 550,
-            },
-        ],
+                },
+            ],
         );
 
         assert_eq!(weight_sum(&weights), 10_000);
@@ -402,8 +403,12 @@ fn growth_strategy_allocates_more_to_higher_apy_sources() {
         ],
     );
 
-    assert!(weight_for(&weights, symbol_short!("comp")) > weight_for(&weights, symbol_short!("blend")));
-    assert!(weight_for(&weights, symbol_short!("blend")) > weight_for(&weights, symbol_short!("aave")));
+    assert!(
+        weight_for(&weights, symbol_short!("comp")) > weight_for(&weights, symbol_short!("blend"))
+    );
+    assert!(
+        weight_for(&weights, symbol_short!("blend")) > weight_for(&weights, symbol_short!("aave"))
+    );
 }
 
 #[test]
@@ -431,8 +436,16 @@ fn defi500_strategy_distributes_evenly_across_registered_sources() {
     );
 
     assert_eq!(weight_sum(&weights), 10_000);
-    assert!(weight_for(&weights, symbol_short!("aave")).abs_diff(weight_for(&weights, symbol_short!("blend"))) <= 1);
-    assert!(weight_for(&weights, symbol_short!("blend")).abs_diff(weight_for(&weights, symbol_short!("comp"))) <= 1);
+    assert!(
+        weight_for(&weights, symbol_short!("aave"))
+            .abs_diff(weight_for(&weights, symbol_short!("blend")))
+            <= 1
+    );
+    assert!(
+        weight_for(&weights, symbol_short!("blend"))
+            .abs_diff(weight_for(&weights, symbol_short!("comp")))
+            <= 1
+    );
 }
 
 #[test]
@@ -468,7 +481,11 @@ fn deactivated_and_unregistered_sources_receive_zero_weight() {
     let (env, admin, registry_id, strategy_id) = setup_with_type(VaultType::Growth);
     let registry = YieldRegistryContractClient::new(&env, &registry_id);
     let client = AllocationStrategyContractClient::new(&env, &strategy_id);
-    registry.update_status(&admin, &symbol_short!("aave"), &RegistrySourceStatus::Paused);
+    registry.update_status(
+        &admin,
+        &symbol_short!("aave"),
+        &RegistrySourceStatus::Paused,
+    );
 
     let weights = client.compute_allocation(
         &10_000_i128,
@@ -488,7 +505,8 @@ fn deactivated_and_unregistered_sources_receive_zero_weight() {
             },
             SourceApy {
                 source_id: symbol_short!("comp"),
-                apy_bps: 100,            },
+                apy_bps: 100,
+            },
         ],
     );
 
@@ -717,4 +735,56 @@ fn suggest_weights_uses_apy_and_risk_scores() {
     assert_eq!(weight_for(&suggested, symbol_short!("aave")), 5_455);
     assert_eq!(weight_for(&suggested, symbol_short!("blend")), 1_515);
     assert_eq!(weight_for(&suggested, symbol_short!("comp")), 3_030);
+}
+
+// AllocationStrategy.compute_allocation writes persistent state with no access control — any network participant can force a rebalance Test - Separate read from write (preferred)
+#[test]
+#[should_panic(expected = "Caller is not an authorized operator")]
+fn test_set_allocation_unauthorized() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, AllocationStrategyContract);
+    let client = AllocationStrategyContractClient::new(&env, &contract_id);
+
+    // Setup: Create a random attacker and an ACL contract
+    let attacker = Address::generate(&env);
+    let acl_address = env.register_contract(None, AccessControlContract);
+
+    // Initialize strategy with the ACL address
+    client.init(&acl_address);
+
+    // Mock data
+    let total_amount = 1000_i128;
+    let apys = Vec::new(&env); // Simplified for test
+
+    // This should panic because 'attacker' does not have the OPERATOR role in ACL
+    env.mock_all_auths();
+    client.set_allocation(&attacker, &total_amount, &apys);
+}
+
+#[test]
+fn test_set_allocation_authorized() {
+    let env = Env::default();
+    env.mock_all_auths(); // Simulates successful authentication
+
+    let contract_id = env.register_contract(None, AllocationStrategyContract);
+    let client = AllocationStrategyContractClient::new(&env, &contract_id);
+
+    let operator = Address::generate(&env);
+    let acl_address = env.register_contract(None, AccessControlContract);
+
+    // Setup ACL: Give the operator the OPERATOR role
+    // (This depends on your AccessControl test utility)
+    let acl_client = AccessControlClient::new(&env, &acl_address);
+    acl_client.grant_role(&operator, &Symbol::new(&env, "OPERATOR"));
+
+    client.init(&acl_address);
+
+    let apys = create_mock_apys(&env); // Helper to create test data
+
+    // This should succeed
+    client.set_allocation(&operator, &1000, &apys);
+
+    // Verify storage was actually updated
+    let weights = client.get_weights();
+    assert!(weights.len() > 0);
 }
