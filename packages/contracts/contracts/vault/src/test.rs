@@ -7,6 +7,7 @@ use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
     token, Address, Env, String,
 };
+use nester_access_control::Role;
 use vault_token::{VaultTokenContract, VaultTokenContractClient};
 
 use crate::{VaultContract, VaultContractClient, VaultStatus};
@@ -299,6 +300,55 @@ fn withdrawal_after_yield_returns_principal_plus_yield() {
     vault.withdraw(&user, &(1_000 * XLM));
     assert_eq!(vault.get_balance(&user), 0);
     assert_eq!(vault.get_total_deposits(), 0);
+}
+
+#[test]
+fn withdrawal_does_not_charge_perf_fee_on_preexisting_yield() {
+    let (env, admin, token, vault, _treasury) = setup();
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let alice_deposit = 1_000 * XLM;
+    let bob_deposit = 1_000 * XLM;
+
+    mint(&token, &alice, alice_deposit);
+    mint(&token, &bob, bob_deposit);
+
+    vault.deposit(&alice, &alice_deposit);
+    vault.grant_role(&admin, &admin, &Role::Manager);
+
+    // Simulate accounting yield that belongs to Alice's holding period.
+    vault.report_yield(&admin, &(100 * XLM));
+
+    vault.deposit(&bob, &bob_deposit);
+    let bob_shares = vault.get_shares(&bob);
+    vault.withdraw(&bob, &bob_shares);
+
+    // Bob only pays early-withdrawal fee (0.1% of 1000 = 1), no performance fee.
+    assert_eq!(token::Client::new(&env, &token.address).balance(&bob), 999 * XLM);
+}
+
+#[test]
+fn withdrawal_charges_perf_fee_only_on_realized_user_yield() {
+    let (env, admin, token, vault, _treasury) = setup();
+    let user = Address::generate(&env);
+    let liquidity_provider = Address::generate(&env);
+    let deposit = 1_000 * XLM;
+
+    mint(&token, &user, deposit);
+    mint(&token, &liquidity_provider, deposit);
+    vault.deposit(&user, &deposit);
+    vault.grant_role(&admin, &admin, &Role::Manager);
+
+    // Double share price in accounting so user has 1000 of realized yield.
+    vault.report_yield(&admin, &deposit);
+    // Add liquid reserves so transfer can satisfy the larger withdrawal amount.
+    vault.deposit(&liquidity_provider, &deposit);
+
+    let shares = vault.get_shares(&user);
+    vault.withdraw(&user, &shares);
+
+    // Gross assets = 2000, performance fee = 100, early fee = 2, net = 1898.
+    assert_eq!(token::Client::new(&env, &token.address).balance(&user), 1_898 * XLM);
 }
 
 #[test]

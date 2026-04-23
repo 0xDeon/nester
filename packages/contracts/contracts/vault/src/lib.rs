@@ -703,6 +703,8 @@ impl VaultContract {
         let total_assets = get_total_assets(&env);
         let accrued_fees = get_accrued_fees(&env);
         let mut assets_to_withdraw = vault_token_client(&env).amount_for_shares(&shares);
+        let current_principal = get_user_principal(&env, &user);
+        let principal_to_remove = current_principal * shares / current_shares;
 
         // Trigger circuit breaker check
         check_circuit_breaker(&env, assets_to_withdraw);
@@ -711,8 +713,8 @@ impl VaultContract {
         let config = get_fee_config(&env);
         let mut total_fee = 0_i128;
 
-        // 1. Performance fee (10% of yield)
-        let yield_part = assets_to_withdraw - shares;
+        // 1. Performance fee applies only to realized gain above user cost basis.
+        let yield_part = assets_to_withdraw - principal_to_remove;
         if yield_part > 0 {
             let perf_fee = nester_common::fees::calculate_performance_fee(
                 yield_part,
@@ -756,12 +758,6 @@ impl VaultContract {
         let new_user_shares = current_shares - shares;
         set_total_assets(&env, total_assets - assets_to_withdraw);
 
-        let current_principal = get_user_principal(&env, &user);
-        let principal_to_remove = if current_shares > 0 {
-            current_principal * shares / current_shares
-        } else {
-            0
-        };
         set_user_principal(&env, &user, current_principal - principal_to_remove);
 
         let current_reserves = get_vault_liquid_reserves(&env);
