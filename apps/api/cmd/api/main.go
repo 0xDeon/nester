@@ -242,19 +242,27 @@ func startEventIndexer(ctx context.Context, logger *slog.Logger, db *sql.DB, rpc
 		logger.Warn("event indexer disabled: STELLAR_RPC_URL is empty")
 		return
 	}
+	if err := ensureIndexerTables(ctx, db); err != nil {
+		logger.Error("event indexer disabled: failed to initialize tables", "error", err)
+		return
+	}
 
 	go func() {
 		client := &http.Client{Timeout: 8 * time.Second}
 		ticker := time.NewTicker(6 * time.Second)
 		defer ticker.Stop()
 
-		var startLedger uint64
-
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				startLedger, err := getLastIndexedLedger(ctx, db)
+				if err != nil {
+					logger.Error("event indexer failed to load cursor", "error", err)
+					continue
+				}
+
 				contractIDs, err := loadVaultContractIDs(ctx, db)
 				if err != nil {
 					logger.Error("event indexer failed to load vault contracts", "error", err)
@@ -271,13 +279,18 @@ func startEventIndexer(ctx context.Context, logger *slog.Logger, db *sql.DB, rpc
 				}
 
 				for _, event := range events {
-					if err := applyIndexedEvent(ctx, db, event); err != nil {
-						logger.Error("event indexer failed to apply event", "contract_id", event.ContractID, "event_type", event.EventType, "error", err)
+					processed, err := applyIndexedEvent(ctx, db, event)
+					if err != nil {
+						logger.Error("event indexer failed to apply event", "event_id", event.ID, "contract_id", event.ContractID, "event_type", event.EventType, "error", err)
+						continue
+					}
+					if !processed {
+						logger.Debug("event indexer skipped duplicate event", "event_id", event.ID)
 					}
 				}
 
-				if latestLedger >= startLedger {
-					startLedger = latestLedger + 1
+				if err := setLastIndexedLedger(ctx, db, latestLedger); err != nil {
+					logger.Error("event indexer failed to persist cursor", "ledger", latestLedger, "error", err)
 				}
 			}
 		}
@@ -309,33 +322,57 @@ func loadVaultContractIDs(ctx context.Context, db *sql.DB) ([]string, error) {
 }
 
 type indexedEvent struct {
+	ID         string
 	ContractID string
 	EventType  string
+	Ledger     uint64
 	Data       map[string]any
 }
 
-func applyIndexedEvent(ctx context.Context, db *sql.DB, event indexedEvent) error {
+func applyIndexedEvent(ctx context.Context, db *sql.DB, event indexedEvent) (bool, error) {
+	if strings.TrimSpace(event.ID) == "" {
+		return false, fmt.Errorf("event id is required")
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	inserted, err := markEventProcessed(ctx, tx, event)
+	if err != nil {
+		return false, err
+	}
+	if !inserted {
+		return false, tx.Commit()
+	}
+
 	switch strings.ToLower(strings.TrimSpace(event.EventType)) {
 	case "pause":
-		_, err := db.ExecContext(
+		_, err := tx.ExecContext(
 			ctx,
 			`UPDATE vaults SET status = 'paused', updated_at = NOW() WHERE contract_address = $1 AND deleted_at IS NULL`,
 			event.ContractID,
 		)
-		return err
+		if err != nil {
+			return false, err
+		}
 	case "unpause":
-		_, err := db.ExecContext(
+		_, err := tx.ExecContext(
 			ctx,
 			`UPDATE vaults SET status = 'active', updated_at = NOW() WHERE contract_address = $1 AND deleted_at IS NULL`,
 			event.ContractID,
 		)
-		return err
+		if err != nil {
+			return false, err
+		}
 	case "deposit":
 		amount, ok := extractEventAmount(event)
 		if !ok {
-			return fmt.Errorf("deposit event missing parseable amount")
+			return false, fmt.Errorf("deposit event missing parseable amount")
 		}
-		_, err := db.ExecContext(
+		_, err := tx.ExecContext(
 			ctx,
 			`UPDATE vaults
 			 SET total_deposited = total_deposited + $1::numeric,
@@ -345,13 +382,15 @@ func applyIndexedEvent(ctx context.Context, db *sql.DB, event indexedEvent) erro
 			amount.String(),
 			event.ContractID,
 		)
-		return err
+		if err != nil {
+			return false, err
+		}
 	case "withdraw", "withdrawal":
 		amount, ok := extractEventAmount(event)
 		if !ok {
-			return fmt.Errorf("withdraw event missing parseable amount")
+			return false, fmt.Errorf("withdraw event missing parseable amount")
 		}
-		_, err := db.ExecContext(
+		_, err := tx.ExecContext(
 			ctx,
 			`UPDATE vaults
 			 SET current_balance = current_balance - $1::numeric,
@@ -360,10 +399,14 @@ func applyIndexedEvent(ctx context.Context, db *sql.DB, event indexedEvent) erro
 			amount.String(),
 			event.ContractID,
 		)
-		return err
+		if err != nil {
+			return false, err
+		}
 	default:
-		return nil
+		// Keep cursor continuity even for unsupported events.
 	}
+
+	return true, tx.Commit()
 }
 
 func extractEventAmount(event indexedEvent) (decimal.Decimal, bool) {
@@ -384,12 +427,23 @@ func extractEventAmount(event indexedEvent) (decimal.Decimal, bool) {
 				return decimal.Zero, false
 			}
 			return value, true
+		case json.Number:
+			value, err := decimal.NewFromString(v.String())
+			if err != nil {
+				return decimal.Zero, false
+			}
+			return value, true
 		case int:
 			return decimal.NewFromInt(int64(v)), true
 		case int64:
 			return decimal.NewFromInt(v), true
 		case float64:
-			return decimal.NewFromFloat(v), true
+			// Avoid binary-float conversion: parse the decimal text form instead.
+			value, err := decimal.NewFromString(fmt.Sprintf("%v", v))
+			if err != nil {
+				return decimal.Zero, false
+			}
+			return value, true
 		}
 	}
 
@@ -443,7 +497,9 @@ func fetchSorobanEvents(
 		Result struct {
 			LatestLedger uint64 `json:"latestLedger"`
 			Events       []struct {
+				ID         string         `json:"id"`
 				ContractID string         `json:"contractId"`
+				Ledger     uint64         `json:"ledger"`
 				Topic      []interface{}  `json:"topic"`
 				Value      map[string]any `json:"value"`
 			} `json:"events"`
@@ -453,7 +509,9 @@ func fetchSorobanEvents(
 		} `json:"error"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&rpcResp); err != nil {
 		return nil, 0, err
 	}
 	if rpcResp.Error != nil {
@@ -472,11 +530,79 @@ func fetchSorobanEvents(
 			continue
 		}
 		events = append(events, indexedEvent{
+			ID:         raw.ID,
 			ContractID: raw.ContractID,
 			EventType:  eventType,
+			Ledger:     raw.Ledger,
 			Data:       raw.Value,
 		})
 	}
 
 	return events, rpcResp.Result.LatestLedger, nil
+}
+
+func ensureIndexerTables(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS event_indexer_state (
+    id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    last_indexed_ledger BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`); err != nil {
+		return err
+	}
+
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS processed_chain_events (
+    event_id TEXT PRIMARY KEY,
+    contract_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    ledger BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`); err != nil {
+		return err
+	}
+
+	_, err := db.ExecContext(ctx, `
+INSERT INTO event_indexer_state (id, last_indexed_ledger)
+VALUES (1, 0)
+ON CONFLICT (id) DO NOTHING`)
+	return err
+}
+
+func getLastIndexedLedger(ctx context.Context, db *sql.DB) (uint64, error) {
+	var ledger uint64
+	err := db.QueryRowContext(ctx, `SELECT last_indexed_ledger FROM event_indexer_state WHERE id = 1`).Scan(&ledger)
+	if err != nil {
+		return 0, err
+	}
+	return ledger, nil
+}
+
+func setLastIndexedLedger(ctx context.Context, db *sql.DB, ledger uint64) error {
+	_, err := db.ExecContext(ctx, `
+UPDATE event_indexer_state
+SET last_indexed_ledger = GREATEST(last_indexed_ledger, $1::bigint),
+    updated_at = NOW()
+WHERE id = 1`, ledger)
+	return err
+}
+
+func markEventProcessed(ctx context.Context, tx *sql.Tx, event indexedEvent) (bool, error) {
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO processed_chain_events (event_id, contract_id, event_type, ledger)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (event_id) DO NOTHING`,
+		event.ID,
+		event.ContractID,
+		event.EventType,
+		event.Ledger,
+	)
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected == 1, nil
 }
