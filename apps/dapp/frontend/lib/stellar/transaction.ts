@@ -102,7 +102,16 @@ export class TransactionTimeoutError extends Error {
 // ── Soroban RPC client ────────────────────────────────────────────────────────
 
 function getServer(rpcUrl: string): SorobanRpc.Server {
-  return new SorobanRpc.Server(rpcUrl, { allowHttp: true });
+  const isProd = process.env.NODE_ENV === "production";
+
+  if (isProd && !rpcUrl.startsWith("https://")) {
+    throw new Error(
+      `Production Soroban RPC URL must use HTTPS. Got: ${rpcUrl}. ` +
+        `Set NEXT_PUBLIC_STELLAR_RPC_URL to a valid https:// endpoint.`
+    );
+  }
+
+  return new SorobanRpc.Server(rpcUrl, { allowHttp: !isProd });
 }
 
 // ── Transaction builders ──────────────────────────────────────────────────────
