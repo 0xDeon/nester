@@ -10,8 +10,9 @@ import {
 } from "react";
 
 import { useWallet } from "@/components/wallet-provider";
-import { getVaultById, type SupportedAsset } from "@/lib/vault-data";
 import { useNetwork } from "@/hooks/useNetwork";
+
+export type SupportedAsset = "USDC" | "XLM";
 
 export type PortfolioTransactionType =
     | "Deposit"
@@ -512,8 +513,4 @@ export function usePortfolio() {
         throw new Error("usePortfolio must be used within PortfolioProvider");
     }
     return context;
-}
-
-export function getVaultForPosition(position: PortfolioPosition) {
-    return getVaultById(position.vaultId);
 }

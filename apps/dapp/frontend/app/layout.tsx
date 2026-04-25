@@ -28,6 +28,7 @@ import { OnboardingProvider } from "@/hooks/useOnboarding";
 import { NetworkProvider } from "@/context/NetworkProvider";
 import { NetworkBanner } from "@/components/network/NetworkSelector";
 import { PrometheusChatbot } from "@/components/ai/prometheusChatbot";
+import { ReactQueryProvider } from "@/components/react-query-provider";
 
 export default function RootLayout({
     children,
@@ -40,24 +41,26 @@ export default function RootLayout({
                 suppressHydrationWarning
                 className={`${inter.className} ${inter.variable} antialiased`}
             >
-                <NetworkProvider>
-                    <SettingsProvider>
-                        <WalletProvider>
-                            <NotificationsProvider>
-                                <NetworkBanner />
-                                <PortfolioProvider>
-                                    <WebSocketProvider>
-                                        <OnboardingProvider>
-                                            {children}
-                                            <NotificationsToaster />
-                                            <PrometheusChatbot />
-                                        </OnboardingProvider>
-                                    </WebSocketProvider>
-                                </PortfolioProvider>
-                            </NotificationsProvider>
-                        </WalletProvider>
-                    </SettingsProvider>
-                </NetworkProvider>
+                <ReactQueryProvider>
+                    <NetworkProvider>
+                        <SettingsProvider>
+                            <WalletProvider>
+                                <NotificationsProvider>
+                                    <NetworkBanner />
+                                    <PortfolioProvider>
+                                        <WebSocketProvider>
+                                            <OnboardingProvider>
+                                                {children}
+                                                <NotificationsToaster />
+                                                <PrometheusChatbot />
+                                            </OnboardingProvider>
+                                        </WebSocketProvider>
+                                    </PortfolioProvider>
+                                </NotificationsProvider>
+                            </WalletProvider>
+                        </SettingsProvider>
+                    </NetworkProvider>
+                </ReactQueryProvider>
             </body>
         </html>
     );

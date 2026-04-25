@@ -47,6 +47,7 @@ interface SavingsVault {
     badge: string;
     features: string[];
     supportedAssets: ("USDC" | "XLM")[];
+    contractAddress: string;
 }
 
 // ── Vault Definitions ─────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ const SAVINGS_VAULTS: SavingsVault[] = [
         badge: "No lockup",
         features: ["Withdraw anytime", "No exit fee", "Daily yield accrual"],
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: "CINVALIDCONTRACTADDRESS00000000000000000000000000000000000",
     },
     {
         id: "auto-compound",
@@ -85,6 +87,7 @@ const SAVINGS_VAULTS: SavingsVault[] = [
         badge: "Auto-reinvest",
         features: ["Daily auto-compounding", "No manual claiming", "No exit fee"],
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: "CINVALIDCONTRACTADDRESS00000000000000000000000000000000000",
     },
     {
         id: "stablecoin-yield",
@@ -102,6 +105,7 @@ const SAVINGS_VAULTS: SavingsVault[] = [
         badge: "Multi-pool",
         features: ["Multi-stablecoin exposure", "Weekly rebalance", "No exit fee"],
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: "CINVALIDCONTRACTADDRESS00000000000000000000000000000000000",
     },
     {
         id: "custom-savings",
@@ -119,6 +123,7 @@ const SAVINGS_VAULTS: SavingsVault[] = [
         badge: "Goal-based",
         features: ["Named savings goal", "Target amount tracking", "Withdraw anytime"],
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: "CINVALIDCONTRACTADDRESS00000000000000000000000000000000000",
     },
 ];
 
@@ -519,6 +524,7 @@ function DepositModal({
                                         const receipt = await executeVaultDeposit({
                                             walletAddress: address,
                                             vaultId: vault.id,
+                                            contractId: vault.contractAddress,
                                             asset: selectedAsset,
                                             amount: parsedAmount,
                                         });

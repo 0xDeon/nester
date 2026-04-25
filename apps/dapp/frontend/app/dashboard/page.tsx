@@ -124,11 +124,14 @@ export default function Dashboard() {
                         <p className="mt-2 text-[12px] text-black/35 tracking-wide">Protocol Balance</p>
                     </div>
                     <div className="mt-8 space-y-5">
-                        <div className="flex items-center justify-between">
-                            <span className="text-[13px] text-black/40">Position APY</span>
-                            <span className="text-[13px] font-medium text-black">
-                                {(avgApy * 100).toFixed(2)}%
-                            </span>
+                        <div className="flex flex-col gap-1">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[13px] text-black/40">Position APY</span>
+                                <span className="text-[13px] font-medium text-black">
+                                    {(avgApy * 100).toFixed(2)}%
+                                </span>
+                            </div>
+                            <p className="text-[9px] text-black/30 text-left">APY is variable and based on recent performance. Past performance is not indicative of future results.</p>
                         </div>
                         <div className="flex items-center justify-between">
                             <span className="text-[13px] text-black/40">Total earnings</span>
@@ -228,8 +231,13 @@ export default function Dashboard() {
                                             <td className="py-4 pr-6 font-mono text-[14px] text-black">
                                                 ${position.currentValue.toFixed(2)}
                                             </td>
-                                            <td className="py-4 pr-6 text-[14px] text-black">
-                                                {((position.apy ?? 0) * 100).toFixed(1)}%
+                                            <td className="py-4 pr-6">
+                                                <div className="text-[14px] text-black">
+                                                    {((position.apy ?? 0) * 100).toFixed(1)}%
+                                                </div>
+                                                <div className="text-[9px] text-black/30 mt-1 max-w-[120px]">
+                                                    APY is variable. Past performance is not indicative of future results.
+                                                </div>
                                             </td>
                                             <td className="py-4 pr-6 font-mono text-[14px] text-black/60">
                                                 +${position.yieldEarned.toFixed(4)}

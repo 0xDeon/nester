@@ -22,14 +22,11 @@ import {
     usePortfolio,
     type PortfolioPosition,
 } from "@/components/portfolio-provider";
-import {
-    buildMockTransactionXdr,
-    signWithWalletOrMock,
-    simulateSubmission,
-} from "@/lib/mock-soroban";
+
 import { cn } from "@/lib/utils";
-import { type VaultDefinition, type SupportedAsset, vaultDefinitions } from "@/lib/vault-data";
+import { useVaults, type Vault as VaultDefinition } from "@/hooks/useVaults";
 import { useWallet } from "@/components/wallet-provider";
+import { executeVaultDeposit, executeVaultWithdraw } from "@/lib/stellar/transaction";
 
 import { useNetwork } from "@/hooks/useNetwork";
 
@@ -122,12 +119,10 @@ export function DepositModal({
         walletPopupUsed: boolean;
     } | null>(null);
 
-    const [selectedAsset, setSelectedAsset] = useState<SupportedAsset>(
-        vault?.supportedAssets?.[0] ?? "USDC"
-    );
+    const [selectedAsset, setSelectedAsset] = useState<"USDC" | "XLM">("USDC");
 
     // Reset selected asset when vault changes
-    const assets = vault?.supportedAssets ?? ["USDC"];
+    const assets = ["USDC"] as ("USDC" | "XLM")[];
     const balance = getAvailableBalance(selectedAsset);
 
     const formSchema = useMemo(() => z.object({
@@ -161,7 +156,7 @@ export function DepositModal({
     const [showLargeWarning, setShowLargeWarning] = useState(false);
     
     const canSubmit = !!vault && !!address && isValid && amount > 0;
-    const estimatedYield = vault ? amount * vault.apy : 0;
+    const estimatedYield = vault && vault.apy !== undefined ? amount * (vault.apy / 100) : 0;
     const sharesReceived = amount;
 
     const reset = () => {
@@ -181,18 +176,16 @@ export function DepositModal({
         setShowLargeWarning(false);
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address,
-                `deposit:${vault.id}:${amount.toFixed(2)}`,
-                currentNetwork.networkPassphrase
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
-
-            setState("submitting");
-            const submission = await simulateSubmission(currentNetwork.explorerUrl);
+            const submission = await executeVaultDeposit({
+                walletAddress: address,
+                vaultId: vault.id,
+                contractId: vault.contractAddress,
+                asset: selectedAsset,
+                amount,
+            });
 
             recordDeposit({
-                vault: { ...vault, asset: selectedAsset },
+                vault: { ...vault, asset: selectedAsset, apy: vault.apy || 0, lockDays: 0, earlyWithdrawalPenaltyPct: 0 },
                 amount,
                 txHash: submission.txHash,
             });
@@ -200,7 +193,7 @@ export function DepositModal({
             setReceipt({
                 txHash: submission.txHash,
                 explorerUrl: submission.explorerUrl,
-                walletPopupUsed,
+                walletPopupUsed: true,
             });
             setState("success");
         } catch (err) {
@@ -242,8 +235,11 @@ export function DepositModal({
                                         {vault.name}
                                     </p>
                                     <p className="mt-2 font-heading text-3xl font-light text-emerald-600">
-                                        {vault.apyLabel}
+                                        {vault.apy !== undefined ? `${vault.apy.toFixed(1)}%` : "TBD"}
                                     </p>
+                                    {vault.apy !== undefined && (
+                                        <p className="text-[9px] text-black/40 mt-1 max-w-[200px]">APY is variable and based on recent performance. Past performance is not indicative of future results.</p>
+                                    )}
                                 </div>
                                 <div className="rounded-2xl bg-secondary px-3 py-2 text-right">
                                     <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -361,19 +357,19 @@ export function DepositModal({
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Lock period</span>
                                     <span className="font-medium text-foreground">
-                                        {vault.lockDays} days
+                                        Flexible
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Management fee (annual)</span>
                                     <span className="font-medium text-foreground">
-                                        {vault.managementFeePct}%
+                                        0.5%
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Performance fee (on yield)</span>
                                     <span className="font-medium text-foreground">
-                                        {vault.performanceFeePct}%
+                                        10%
                                     </span>
                                 </div>
                                 {currentNetwork.id === 'mainnet' && (
@@ -607,23 +603,25 @@ export function WithdrawModal({
         onClose();
     };
 
+    const { data: vaults = [] } = useVaults();
+    const vault = vaults.find(v => v.id === position?.vaultId);
+
     const processWithdrawal = async () => {
-        if (!position || !address || !quote || !canSubmit) return;
+        if (!position || !address || !quote || !canSubmit || !vault) return;
 
         setError("");
         setState("confirming");
         setShowLargeWarning(false);
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address,
-                `withdraw:${position.vaultId}:${amount.toFixed(2)}`,
-                currentNetwork.networkPassphrase
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
+            const submission = await executeVaultWithdraw({
+                walletAddress: address,
+                vaultId: position.vaultId,
+                contractId: vault.contractAddress,
+                asset: position.asset as "USDC" | "XLM",
+                shares: amount,
+            });
 
-            setState("submitting");
-            const submission = await simulateSubmission(currentNetwork.explorerUrl);
             const result = recordWithdrawal({
                 positionId: position.id,
                 grossAmount: quote.grossAmount,
@@ -637,7 +635,7 @@ export function WithdrawModal({
             setReceipt({
                 txHash: submission.txHash,
                 explorerUrl: submission.explorerUrl,
-                walletPopupUsed,
+                walletPopupUsed: true,
                 penaltyAmount: result.penaltyAmount,
                 netAmount: result.netAmount,
             });
@@ -889,9 +887,10 @@ export function TransferModal({
         walletPopupUsed: boolean;
     } | null>(null);
 
+    const { data: vaults = [] } = useVaults();
     const destinationVaults = useMemo(
-        () => vaultDefinitions.filter((v) => v.id !== position?.vaultId),
-        [position?.vaultId]
+        () => vaults.filter((v) => v.id !== position?.vaultId),
+        [position?.vaultId, vaults]
     );
 
     const selectedVault = destinationVaults.find((v) => v.id === selectedVaultId) ?? null;
@@ -948,36 +947,7 @@ export function TransferModal({
         setState("confirming");
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address ?? "",
-                `transfer:${position.vaultId}:${selectedVault.id}:${amt.toFixed(2)}`,
-                currentNetwork.networkPassphrase,
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
-            setState("submitting");
-            const { txHash, explorerUrl } = await simulateSubmission(currentNetwork.explorerUrl);
-
-            recordTransfer({
-                fromPositionId: position.id,
-                toVault: {
-                    id: selectedVault.id,
-                    name: selectedVault.name,
-                    asset: selectedVault.asset,
-                    apy: selectedVault.apy,
-                    lockDays: selectedVault.lockDays,
-                    earlyWithdrawalPenaltyPct: selectedVault.earlyWithdrawalPenaltyPct,
-                },
-                amount: amt,
-                txHash,
-            });
-
-            setReceipt({
-                amount: amt,
-                toVaultName: selectedVault.name,
-                explorerUrl,
-                walletPopupUsed,
-            });
-            setState("success");
+            throw new Error("Transfers are not yet live. Transfers are currently disabled.");
         } catch (err) {
             setState("error");
             setError(err instanceof Error ? err.message : "Transfer failed. Please try again.");
@@ -1038,7 +1008,7 @@ export function TransferModal({
                                                 <div>
                                                     <p className="text-sm font-medium text-foreground">{vault.name}</p>
                                                     <p className="text-xs text-muted-foreground">
-                                                        {vault.apyLabel} APY · {vault.risk} risk
+                                                        {vault.apy !== undefined ? `${vault.apy.toFixed(1)}% APY` : "APY TBD"} · {vault.strategy}
                                                     </p>
                                                 </div>
                                                 {selectedVaultId === vault.id && (
@@ -1122,7 +1092,7 @@ export function TransferModal({
                                     {selectedVault && (
                                         <div className="flex items-center justify-between text-sm">
                                             <span className="text-muted-foreground">Destination APY</span>
-                                            <span className="font-medium text-emerald-600">{selectedVault.apyLabel}</span>
+                                            <span className="font-medium text-emerald-600">{selectedVault.apy !== undefined ? `${selectedVault.apy.toFixed(1)}%` : "TBD"}</span>
                                         </div>
                                     )}
                                     {currentNetwork.id === "mainnet" && (
