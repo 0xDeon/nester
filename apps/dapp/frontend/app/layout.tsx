@@ -30,6 +30,7 @@ import { NetworkBanner } from "@/components/network/NetworkSelector";
 import { PrometheusChatbot } from "@/components/ai/prometheusChatbot";
 import { ReactQueryProvider } from "@/components/react-query-provider";
 import { AuthProvider } from "@/components/auth-provider";
+import { BottomNav } from "@/components/bottom-nav";
 
 export default function RootLayout({
     children,
@@ -40,7 +41,7 @@ export default function RootLayout({
         <html lang="en" suppressHydrationWarning>
             <body
                 suppressHydrationWarning
-                className={`${inter.className} ${inter.variable} antialiased`}
+                className={`${inter.className} ${inter.variable} antialiased md:pb-0 mobile-content-pad`}
             >
                 <ReactQueryProvider>
                     <NetworkProvider>
@@ -53,6 +54,7 @@ export default function RootLayout({
                                             <WebSocketProvider>
                                                 <OnboardingProvider>
                                                     {children}
+                                                    <BottomNav />
                                                     <NotificationsToaster />
                                                     <PrometheusChatbot />
                                                 </OnboardingProvider>

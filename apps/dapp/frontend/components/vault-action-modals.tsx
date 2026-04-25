@@ -59,15 +59,15 @@ function ModalShell({
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-[100] bg-black/45 px-4 py-8 backdrop-blur-sm"
+                    className="fixed inset-0 z-[100] bg-black/45 sm:px-4 sm:py-8 backdrop-blur-sm"
                 >
-                    <div className="flex min-h-full items-center justify-center">
+                    <div className="flex h-full sm:min-h-full items-end sm:items-center justify-center">
                         <motion.div
                             initial={{ opacity: 0, y: 24, scale: 0.98 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 12, scale: 0.98 }}
                             transition={{ duration: 0.2 }}
-                            className="w-full max-w-2xl overflow-hidden rounded-[28px] border border-white/10 bg-[#fafafa] shadow-2xl max-h-[90vh] flex flex-col"
+                            className="w-full h-full sm:h-auto sm:max-w-2xl overflow-hidden sm:rounded-[28px] border border-white/10 bg-[#fafafa] shadow-2xl sm:max-h-[90vh] flex flex-col"
                         >
                             <div className="flex items-start justify-between border-b border-border px-6 py-5">
                                 <div>
@@ -83,9 +83,9 @@ function ModalShell({
                                 </div>
                                 <button
                                     onClick={onClose}
-                                    className="rounded-full border border-border bg-white p-2 text-muted-foreground transition-colors hover:text-foreground"
+                                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-border bg-white text-muted-foreground transition-colors hover:text-foreground active:bg-secondary"
                                 >
-                                    <X className="h-4 w-4" />
+                                    <X className="h-5 w-5" />
                                 </button>
                             </div>
                             <div className="overflow-y-auto flex-1">
@@ -298,7 +298,7 @@ export function DepositModal({
                                                                         setShowLargeWarning(false);
                                                                     }}
                                                                     className={cn(
-                                                                        "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                                                                        "min-h-[var(--touch-target)] min-w-[var(--touch-target)] rounded-full px-3 text-xs font-medium transition-colors",
                                                                         selectedAsset === a
                                                                             ? "bg-foreground text-background"
                                                                             : "text-foreground/60 hover:text-foreground"
@@ -320,7 +320,7 @@ export function DepositModal({
                                                             trigger("amount");
                                                             setShowLargeWarning(false);
                                                         }}
-                                                        className="rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
+                                                        className="min-h-[var(--touch-target)] min-w-[var(--touch-target)] rounded-full border border-border bg-white px-3 text-xs font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                                     >
                                                         Max
                                                     </button>
@@ -495,7 +495,7 @@ export function DepositModal({
                             <div className="mt-5 flex gap-3">
                                 <button
                                     onClick={reset}
-                                    className="flex-1 rounded-full border border-border bg-white px-5 py-3 text-sm font-medium text-foreground transition-colors hover:border-black/15"
+                                    className="flex-1 min-h-[var(--touch-target)] rounded-full border border-border bg-white px-5 text-sm font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                 >
                                     {state === "success" ? "Close" : "Cancel"}
                                 </button>
@@ -503,7 +503,7 @@ export function DepositModal({
                                     <button
                                         onClick={handleDeposit}
                                         disabled={!canSubmit || state === "confirming" || state === "submitting"}
-                                        className="flex-1 rounded-full bg-brand-dark px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                        className="flex-1 min-h-[var(--touch-target)] rounded-full bg-brand-dark px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
                                     >
                                         {state === "confirming" && (
                                             <span className="inline-flex items-center gap-2">
@@ -739,7 +739,7 @@ export function WithdrawModal({
                                             )}
                                         />
                                         <div className="flex items-center gap-2">
-                                            <span className="rounded-full bg-secondary px-3 py-2 text-sm font-medium text-foreground">
+                                            <span className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full bg-secondary px-3 text-sm font-medium text-foreground">
                                                 {position.asset ?? "USDC"}
                                             </span>
                                             <button
@@ -748,7 +748,7 @@ export function WithdrawModal({
                                                     trigger("amount");
                                                     setShowLargeWarning(false);
                                                 }}
-                                                className="rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
+                                                className="min-h-[var(--touch-target)] min-w-[var(--touch-target)] rounded-full border border-border bg-white px-3 text-xs font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                             >
                                                 Max
                                             </button>
@@ -828,7 +828,7 @@ export function WithdrawModal({
                     <div className="flex gap-3 pt-2">
                         <button
                             onClick={reset}
-                            className="flex-1 rounded-full border border-border bg-white px-5 py-3 text-sm font-medium text-foreground transition-colors hover:border-black/15"
+                            className="flex-1 min-h-[var(--touch-target)] rounded-full border border-border bg-white px-5 text-sm font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                         >
                             {state === "success" ? "Close" : "Cancel"}
                         </button>
@@ -836,7 +836,7 @@ export function WithdrawModal({
                             <button
                                 onClick={handleWithdraw}
                                 disabled={!canSubmit || state === "confirming" || state === "submitting"}
-                                className="flex-1 rounded-full bg-[#0a0a0a] px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                className="flex-1 min-h-[var(--touch-target)] rounded-full bg-[#0a0a0a] px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
                             >
                                 {state === "confirming" && (
                                     <span className="inline-flex items-center gap-2">
@@ -1149,7 +1149,7 @@ export function TransferModal({
                                 <button
                                     type="button"
                                     onClick={reset}
-                                    className="flex-1 rounded-full border border-border bg-white px-5 py-3 text-sm font-medium text-foreground transition-colors hover:border-black/15"
+                                    className="flex-1 min-h-[var(--touch-target)] rounded-full border border-border bg-white px-5 text-sm font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                 >
                                     {state === "success" ? "Close" : "Cancel"}
                                 </button>
@@ -1157,7 +1157,7 @@ export function TransferModal({
                                     <button
                                         onClick={handleTransfer}
                                         disabled={!canSubmit || state === "confirming" || state === "submitting"}
-                                        className="flex-1 rounded-full bg-brand-dark px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                        className="flex-1 min-h-[var(--touch-target)] rounded-full bg-brand-dark px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
                                     >
                                         {state === "confirming" && (
                                             <span className="inline-flex items-center gap-2">

@@ -189,10 +189,10 @@ export function Navbar() {
                                     {/* Mobile hamburger */}
                                     <button
                                         onClick={() => setMobileOpen(!mobileOpen)}
-                                        className="md:hidden flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-white text-foreground/70 transition-colors hover:text-foreground"
+                                        className="md:hidden flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-white text-foreground/70 transition-colors hover:text-foreground active:bg-secondary/50"
                                         aria-label="Toggle menu"
                                     >
-                                        {mobileOpen ? <X className="h-4.5 w-4.5" /> : <Menu className="h-4.5 w-4.5" />}
+                                        {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                                     </button>
                                 </>
                             ) : (
@@ -219,62 +219,81 @@ export function Navbar() {
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
+                            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
                             onClick={() => setMobileOpen(false)}
                         />
 
-                        {/* Drawer panel */}
+                        {/* Slide-out Drawer */}
                         <motion.div
-                            initial={{ opacity: 0, y: -12 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -12 }}
-                            transition={{ duration: 0.2, ease: "easeOut" }}
-                            className="fixed left-4 right-4 top-26 z-50 md:hidden rounded-2xl border border-border bg-white shadow-2xl shadow-black/10 overflow-hidden"
+                            initial={{ x: "100%" }}
+                            animate={{ x: 0 }}
+                            exit={{ x: "100%" }}
+                            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                            drag="x"
+                            dragConstraints={{ left: 0, right: 0 }}
+                            dragElastic={0.2}
+                            onDragEnd={(e, { offset, velocity }) => {
+                                if (offset.x > 100 || velocity.x > 500) {
+                                    setMobileOpen(false);
+                                }
+                            }}
+                            className="fixed right-0 top-0 bottom-0 z-50 w-[280px] md:hidden bg-white shadow-2xl flex flex-col"
                         >
+                            <div className="flex items-center justify-between p-4 border-b border-border">
+                                <span className="font-heading font-medium text-foreground">Menu</span>
+                                <button
+                                    onClick={() => setMobileOpen(false)}
+                                    className="p-2 -mr-2 text-foreground/50 hover:text-foreground"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+
                             {/* Address */}
-                            <div className="px-5 py-4 border-b border-border">
-                                <p className="text-[10px] uppercase tracking-widest text-black/40 mb-1">Wallet</p>
+                            <div className="px-5 py-6 border-b border-border bg-secondary/30">
+                                <p className="text-[10px] uppercase tracking-widest text-black/40 mb-2">Connected Wallet</p>
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <div className="h-2 w-2 rounded-full bg-emerald-500" />
-                                        <span className="font-mono text-sm text-black/70">
+                                        <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                                        <span className="font-mono text-base text-black/80 font-medium">
                                             {address ? truncateAddress(address, 8) : ""}
                                         </span>
                                     </div>
-                                    <button onClick={copyAddress} className="text-black/30 hover:text-black/60 transition-colors">
-                                        {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                                    <button onClick={copyAddress} className="p-2 -mr-2 text-black/40 hover:text-black/70 transition-colors">
+                                        {copied ? <Check className="h-4.5 w-4.5 text-emerald-500" /> : <Copy className="h-4.5 w-4.5" />}
                                     </button>
                                 </div>
                             </div>
 
                             {/* Nav links */}
-                            <div className="px-3 py-3 space-y-0.5">
+                            <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
                                 {NAV_LINKS.map((item) => (
                                     <Link
                                         key={item.label}
                                         href={item.href}
+                                        onClick={() => setMobileOpen(false)}
                                         className={cn(
-                                            "flex items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-colors",
+                                            "flex items-center justify-between rounded-xl px-4 py-3.5 text-base font-medium transition-colors",
                                             pathname === item.href
                                                 ? "bg-black text-white"
-                                                : "text-black/60 hover:bg-black/5 hover:text-black"
+                                                : "text-black/70 hover:bg-black/5 hover:text-black"
                                         )}
                                     >
                                         {item.label}
                                         {pathname === item.href && (
-                                            <span className="h-1.5 w-1.5 rounded-full bg-white/70" />
+                                            <span className="h-1.5 w-1.5 rounded-full bg-white" />
                                         )}
                                     </Link>
                                 ))}
                             </div>
 
                             {/* Disconnect */}
-                            <div className="px-3 pb-3 pt-1 border-t border-border mt-1">
+                            <div className="p-4 border-t border-border pb-safe">
                                 <button
                                     onClick={() => { disconnect(); setMobileOpen(false); }}
-                                    className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-red-500 hover:bg-red-50 transition-colors"
+                                    className="flex w-full items-center justify-center gap-3 rounded-xl border border-red-200 px-4 py-3.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors min-h-[44px]"
                                 >
-                                    <LogOut className="h-4 w-4" />
+                                    <LogOut className="h-4.5 w-4.5" />
                                     Disconnect
                                 </button>
                             </div>

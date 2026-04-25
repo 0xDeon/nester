@@ -93,16 +93,16 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2.5">
                     <Link
                         href="/vaults"
-                        className="flex items-center gap-2 rounded-full border border-black/[0.1] bg-white px-5 py-2.5 text-[13px] font-medium text-black/65 transition-all hover:border-black/20 hover:shadow-sm"
+                        className="flex min-h-[var(--touch-target)] items-center justify-center gap-2 rounded-full border border-black/[0.1] bg-white px-6 sm:px-5 py-2.5 text-[14px] sm:text-[13px] font-medium text-black/65 transition-all hover:border-black/20 hover:shadow-sm active:bg-black/5"
                     >
-                        <ArrowDownToLine className="h-3.5 w-3.5" />
+                        <ArrowDownToLine className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                         Deposit
                     </Link>
                     <Link
                         href="/savings"
-                        className="flex items-center gap-2 rounded-full border border-black/[0.1] bg-white px-5 py-2.5 text-[13px] font-medium text-black/65 transition-all hover:border-black/20 hover:shadow-sm"
+                        className="flex min-h-[var(--touch-target)] items-center justify-center gap-2 rounded-full border border-black/[0.1] bg-white px-6 sm:px-5 py-2.5 text-[14px] sm:text-[13px] font-medium text-black/65 transition-all hover:border-black/20 hover:shadow-sm active:bg-black/5"
                     >
-                        <PiggyBank className="h-3.5 w-3.5" />
+                        <PiggyBank className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                         Save
                     </Link>
                 </div>
@@ -118,7 +118,7 @@ export default function Dashboard() {
                 {/* Left — balance + stats */}
                 <div className="p-8 lg:p-10 flex flex-col justify-between">
                     <div>
-                        <p className="text-[42px] font-light leading-none text-black tracking-[-0.02em]">
+                        <p className="text-[32px] sm:text-[42px] font-light leading-none text-black tracking-[-0.02em] break-all">
                             ${protocolBalanceUsd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
                         <p className="mt-2 text-[12px] text-black/35 tracking-wide">Protocol Balance</p>
@@ -189,7 +189,7 @@ export default function Dashboard() {
             >
                 <div className="flex items-center justify-between px-8 pt-7 pb-0">
                     <h2 className="text-[16px] font-semibold text-black">Positions</h2>
-                    <Link href="/vaults" data-tour="deposit-cta" className="text-[12px] text-black/35 transition-colors hover:text-black">
+                    <Link href="/vaults" data-tour="deposit-cta" className="flex min-h-[var(--touch-target)] items-center px-2 -mr-2 text-[14px] sm:text-[12px] text-black/35 transition-colors hover:text-black">
                         + New Position
                     </Link>
                 </div>
@@ -202,8 +202,8 @@ export default function Dashboard() {
                             </p>
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left">
+                        <div className="overflow-x-auto pb-2">
+                            <table className="w-full text-left min-w-[600px]">
                                 <thead>
                                     <tr className="border-b border-black/[0.05] text-[11px] text-black/35">
                                         <th className="pb-3.5 pr-6 font-medium">Vault</th>
@@ -250,7 +250,7 @@ export default function Dashboard() {
                                             <td className="py-4">
                                                 <button
                                                     onClick={() => setSelectedPosition(position)}
-                                                    className="rounded-lg border border-black/[0.08] px-3.5 py-1.5 text-[12px] text-black/50 transition-colors hover:border-black/20 hover:text-black"
+                                                    className="flex min-h-[var(--touch-target)] sm:min-h-0 sm:py-1.5 items-center justify-center rounded-lg border border-black/[0.08] px-4 sm:px-3.5 text-[14px] sm:text-[12px] text-black/50 transition-colors hover:border-black/20 hover:text-black active:bg-black/5"
                                                 >
                                                     Withdraw
                                                 </button>
@@ -376,9 +376,10 @@ function WalletBalanceTable({
     }
 
     return (
-        <table className="w-full text-left">
-            <thead>
-                <tr className="border-b border-black/[0.05] text-[11px] text-black/35">
+        <div className="overflow-x-auto pb-2">
+            <table className="w-full text-left min-w-[400px]">
+                <thead>
+                    <tr className="border-b border-black/[0.05] text-[11px] text-black/35">
                     <th className="pb-3.5 pr-6 font-medium">Asset</th>
                     <th className="pb-3.5 pr-6 font-medium text-right">Balance</th>
                     <th className="pb-3.5 pr-6 font-medium text-right">Price</th>
@@ -416,5 +417,6 @@ function WalletBalanceTable({
                 ))}
             </tbody>
         </table>
+        </div>
     );
 }

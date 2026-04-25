@@ -207,13 +207,13 @@ function VaultRow({ vault, index, onSelect }: { vault: VaultType; index: number;
                     {vault.apy !== undefined ? `${vault.apy.toFixed(1)}%` : 'TBD'}
                 </span>
                 <Link href={`/vaults/${vault.id}`}>
-                    <button className="h-8 rounded-lg border border-black/10 px-3 text-xs text-black/45 hover:border-black/20 hover:text-black transition-colors">
+                    <button className="h-[var(--touch-target)] sm:h-8 rounded-lg border border-black/10 px-4 sm:px-3 text-sm sm:text-xs text-black/45 hover:border-black/20 hover:text-black transition-colors">
                         Details
                     </button>
                 </Link>
                 <button
                     onClick={() => onSelect(vault)}
-                    className="flex h-8 items-center gap-1 rounded-lg bg-black px-3 text-xs text-white transition-opacity hover:opacity-75"
+                    className="flex h-[var(--touch-target)] sm:h-8 items-center gap-1 rounded-lg bg-black px-4 sm:px-3 text-sm sm:text-xs text-white transition-opacity hover:opacity-75 active:scale-[0.98]"
                 >
                     Supply <ArrowUpRight className="h-3 w-3" />
                 </button>
@@ -275,13 +275,13 @@ function VaultGridCard({ vault, index, onSelect }: { vault: VaultType; index: nu
             {/* Actions */}
             <div className="flex gap-2">
                 <Link href={`/vaults/${vault.id}`} className="flex-1">
-                    <button className="h-9 w-full rounded-xl border border-black/10 text-xs text-black/45 hover:border-black/20 hover:text-black transition-colors">
+                    <button className="h-[var(--touch-target)] sm:h-9 w-full rounded-xl border border-black/10 text-sm sm:text-xs text-black/45 hover:border-black/20 hover:text-black transition-colors active:bg-black/5">
                         Details
                     </button>
                 </Link>
                 <button
                     onClick={() => onSelect(vault)}
-                    className="flex flex-1 h-9 items-center justify-center gap-1 rounded-xl bg-black text-xs text-white transition-opacity hover:opacity-75"
+                    className="flex flex-1 h-[var(--touch-target)] sm:h-9 items-center justify-center gap-1 rounded-xl bg-black text-sm sm:text-xs text-white transition-opacity hover:opacity-75 active:scale-[0.98]"
                 >
                     Supply <ArrowUpRight className="h-3.5 w-3.5" />
                 </button>
@@ -333,7 +333,7 @@ function VaultsPageContent({ view, onSelect, vaults }: { view: "list" | "grid"; 
 
     if (view === "grid") {
         return (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {filteredAndSorted.map((v, i) => (
                     <VaultGridCard key={v.id} vault={v} index={i} onSelect={onSelect} />
                 ))}

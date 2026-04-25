@@ -203,9 +203,9 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
                     {/* Mobile hamburger */}
                     <button
                         onClick={() => setMobileOpen(!mobileOpen)}
-                        className="lg:hidden flex h-9 w-9 items-center justify-center rounded-xl border border-black/[0.08] text-black/50"
+                        className="lg:hidden flex h-[var(--touch-target)] w-[var(--touch-target)] items-center justify-center rounded-xl border border-black/[0.08] text-black/50 active:bg-black/5"
                     >
-                        {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+                        {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                     </button>
                 </div>
             </header>
@@ -218,31 +218,49 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm lg:hidden"
+                            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden"
                             onClick={() => setMobileOpen(false)}
                         />
                         <motion.div
-                            initial={{ opacity: 0, y: -8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -8 }}
-                            className="fixed left-4 right-4 top-24 z-50 rounded-2xl border border-black/[0.06] bg-white shadow-xl lg:hidden"
+                            initial={{ x: "100%" }}
+                            animate={{ x: 0 }}
+                            exit={{ x: "100%" }}
+                            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                            drag="x"
+                            dragConstraints={{ left: 0, right: 0 }}
+                            dragElastic={0.2}
+                            onDragEnd={(e, { offset, velocity }) => {
+                                if (offset.x > 100 || velocity.x > 500) {
+                                    setMobileOpen(false);
+                                }
+                            }}
+                            className="fixed right-0 top-0 bottom-0 z-50 w-[280px] bg-white shadow-2xl lg:hidden flex flex-col"
                         >
-                            <nav className="p-3 space-y-0.5">
+                            <div className="flex items-center justify-between p-4 border-b border-black/[0.06]">
+                                <span className="font-medium text-black">Menu</span>
+                                <button
+                                    onClick={() => setMobileOpen(false)}
+                                    className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-black/50 hover:text-black active:bg-black/5"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                            <nav className="flex-1 overflow-y-auto p-4 space-y-1">
                                 {SIDEBAR_NAV.map((item) => {
-                                    const active = pathname === item.href;
+                                    const active = pathname === item.href || pathname.startsWith(item.href + "/");
                                     return (
                                         <Link
                                             key={item.href}
                                             href={item.href}
                                             onClick={() => setMobileOpen(false)}
                                             className={cn(
-                                                "flex items-center gap-3 rounded-xl px-4 py-3 text-[14px] font-medium transition-colors",
+                                                "flex min-h-[var(--touch-target)] items-center gap-3 rounded-xl px-4 py-3 text-[16px] font-medium transition-colors active:scale-[0.98]",
                                                 active
                                                     ? "bg-black text-white"
-                                                    : "text-black/60 hover:bg-black/5"
+                                                    : "text-black/60 hover:bg-black/5 hover:text-black"
                                             )}
                                         >
-                                            <item.icon className="h-[18px] w-[18px]" />
+                                            <item.icon className="h-5 w-5" />
                                             {item.label}
                                         </Link>
                                     );
