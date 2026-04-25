@@ -136,21 +136,20 @@ func run() error {
 		challengeStore = service.NewInMemoryChallengeStore(cfg.Auth().ChallengeExpiry())
 		baseLogger.Info("challenge store: in-memory (single-instance only)")
 	}
+
 	authService := service.NewAuthService(challengeStore, userService, cfg.Auth())
 	authHandler := handler.NewAuthHandler(authService)
 
 	oracleService := oracle.NewRateService(cfg.Stellar().HorizonURL())
 	rateHandler := handler.NewRateHandler(oracleService)
-	
+
 	wsHub := ws.NewHub(baseLogger.WithGroup("websocket"), func(token string) (string, error) {
-		// Token validation should be performed here. 
-		// Return userID if successful, error otherwise.
 		if token == "" {
 			return "", fmt.Errorf("missing token")
 		}
 		return "user-id-from-token", nil // Placeholder for actual JWT validation
 	})
-	
+
 	wsCtx, wsCancel := context.WithCancel(context.Background())
 	defer wsCancel()
 	go wsHub.Run(wsCtx)
@@ -173,12 +172,15 @@ func run() error {
 		}
 	}()
 
-	// ready tracks whether the server is accepting traffic. Flipped to false on
-	// shutdown so load balancers stop routing before in-flight drain begins.
 	var ready atomic.Bool
 	ready.Store(true)
 
 	depHTTPClient := &http.Client{Timeout: cfg.Startup().DependencyTimeout()}
+
+	paystackResolver := service.NewPaystackResolver(cfg.Bank().PaystackKey())
+	flutterwaveResolver := service.NewFlutterwaveResolver(cfg.Bank().FlutterwaveKey())
+	bankService := service.NewBankService(paystackResolver, flutterwaveResolver)
+	bankHandler := handler.NewBankHandler(bankService)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", livenessHandler(&ready))
@@ -203,6 +205,7 @@ func run() error {
 	authHandler.Register(mux)
 	rateHandler.Register(mux)
 	performanceHandler.Register(mux)
+	bankHandler.Register(mux)
 
 	mux.HandleFunc("GET /ws", wsHub.ServeWs)
 
@@ -212,25 +215,18 @@ func run() error {
 		{PathPrefix: "/readyz", Public: true},
 		{PathPrefix: "/ws", Public: true},
 		{PathPrefix: "/api/v1/auth/", Public: true},
+		{PathPrefix: "/api/v1/banks/", Public: true},
 		{PathPrefix: "/api/v1/admin/", Public: false, Role: "admin"},
 		{PathPrefix: "/api/v1/", Public: false},
 	}
 	authenticator := middleware.Authenticate(cfg.Auth().Secret(), authRules)
-	// Global rate limit applies to all requests per IP.
 	globalLimiter := middleware.IPRateLimiter(cfg.RateLimit().GlobalLimit(), cfg.RateLimit().GlobalWindow())
-	// Write rate limit is stricter and applies only to mutating methods (POST/PUT/PATCH/DELETE).
 	writeLimiter := middleware.WriteMethodRateLimiter(cfg.RateLimit().WriteLimit(), cfg.RateLimit().WriteWindow())
-	// Wallet rate limit runs inside Authenticate so the caller's wallet address
-	// is in context. Unauthenticated requests produce an empty key and pass
-	// through — public routes are covered by the IP and write limiters above.
 	walletLimiter := middleware.WalletRateLimiter(
 		cfg.RateLimit().WalletLimit(),
 		cfg.RateLimit().WalletWindow(),
 		walletKeyFromContext,
 	)
-	// CORS sits inside rate limiting (preflights count against the bucket) and
-	// outside auth (preflights don't carry credentials and must short-circuit
-	// before Authenticate rejects them).
 	cors := middleware.CORS(cfg.AllowedOrigins())
 
 	server := &http.Server{
@@ -293,8 +289,6 @@ func run() error {
 
 	stop()
 
-	// Flip readiness immediately so load balancers stop routing new traffic
-	// to this instance before we wait for in-flight requests to complete.
 	ready.Store(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server().GracefulShutdown())
@@ -315,9 +309,6 @@ func run() error {
 	return nil
 }
 
-// walletKeyFromContext returns the authenticated caller's wallet address for
-// per-wallet rate limiting. An empty string means no key is available (public
-// route or claims without a wallet) — WalletRateLimiter passes those through.
 func walletKeyFromContext(r *http.Request) string {
 	u, ok := auth.GetUserFromContext(r.Context())
 	if !ok {
@@ -326,9 +317,6 @@ func walletKeyFromContext(r *http.Request) string {
 	return u.WalletAddress
 }
 
-// livenessHandler returns 200 while the process is healthy and 503 once
-// shutdown has begun. It performs no external calls so load balancers can
-// poll it cheaply.
 func livenessHandler(ready *atomic.Bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -342,9 +330,6 @@ func livenessHandler(ready *atomic.Bool) http.HandlerFunc {
 	}
 }
 
-// readinessHandler returns 200 only when the database is reachable and the
-// process is not draining. Used by orchestrators that need to know when this
-// instance can serve traffic.
 func readinessHandler(ready *atomic.Bool, db *repository.PostgresDB, timeout time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -396,14 +381,14 @@ type dbStatus struct {
 }
 
 type detailedHealthResponse struct {
-	Status       string           `json:"status"`
-	Environment  string           `json:"environment"`
-	Version      string           `json:"version"`
-	UptimeSecs   int64            `json:"uptime_seconds"`
-	Database     dbStatus         `json:"database"`
-	Horizon      dependencyStatus `json:"horizon"`
-	SorobanRPC   dependencyStatus `json:"soroban_rpc"`
-	GeneratedAt  time.Time        `json:"generated_at"`
+	Status      string           `json:"status"`
+	Environment string           `json:"environment"`
+	Version     string           `json:"version"`
+	UptimeSecs  int64            `json:"uptime_seconds"`
+	Database    dbStatus         `json:"database"`
+	Horizon     dependencyStatus `json:"horizon"`
+	SorobanRPC  dependencyStatus `json:"soroban_rpc"`
+	GeneratedAt time.Time        `json:"generated_at"`
 }
 
 func detailedHealthHandler(deps detailedHealthDeps) http.HandlerFunc {
@@ -416,7 +401,6 @@ func detailedHealthHandler(deps detailedHealthDeps) http.HandlerFunc {
 			GeneratedAt: time.Now().UTC(),
 		}
 
-		// Database
 		dbCtx, dbCancel := context.WithTimeout(r.Context(), deps.dbTimeout)
 		dbStart := time.Now()
 		dbErr := deps.pgPool.Ping(dbCtx)
@@ -434,7 +418,6 @@ func detailedHealthHandler(deps detailedHealthDeps) http.HandlerFunc {
 			resp.Database.Error = dbErr.Error()
 		}
 
-		// Horizon
 		hStart := time.Now()
 		hRes := stellarpkg.PingHorizon(r.Context(), deps.httpClient, deps.horizonURL)
 		resp.Horizon = dependencyStatus{
@@ -445,7 +428,6 @@ func detailedHealthHandler(deps detailedHealthDeps) http.HandlerFunc {
 			LatestLedger:  hRes.LatestLedger,
 		}
 
-		// Soroban RPC
 		rStart := time.Now()
 		rRes := stellarpkg.PingSorobanRPC(r.Context(), deps.httpClient, deps.rpcURL)
 		resp.SorobanRPC = dependencyStatus{
@@ -476,9 +458,6 @@ func detailedHealthHandler(deps detailedHealthDeps) http.HandlerFunc {
 	}
 }
 
-// pingStellarDependencies verifies Horizon and Soroban RPC are reachable
-// before the server starts accepting traffic. Failure here exits the process
-// so orchestrators can restart against a healthy node.
 func pingStellarDependencies(logger *slog.Logger, cfg *config.Config) error {
 	timeout := cfg.Startup().DependencyTimeout()
 	client := &http.Client{Timeout: timeout}
@@ -703,7 +682,6 @@ func extractEventAmount(event indexedEvent) (decimal.Decimal, bool) {
 		case int64:
 			return decimal.NewFromInt(v), true
 		case float64:
-			// Avoid binary-float conversion: parse the decimal text form instead.
 			value, err := decimal.NewFromString(fmt.Sprintf("%v", v))
 			if err != nil {
 				return decimal.Zero, false
@@ -730,7 +708,7 @@ func fetchSorobanEvents(
 			"startLedger": startLedger,
 			"filters": []map[string]any{
 				{
-					"type":      "contract",
+					"type":        "contract",
 					"contractIds": contractIDs,
 				},
 			},
@@ -872,9 +850,6 @@ ON CONFLICT (event_id) DO NOTHING`,
 	return rowsAffected == 1, nil
 }
 
-// mainEventSyncer implements handler.EventSyncer using the same indexer
-// helpers defined in this package, allowing the admin handler to trigger
-// a manual one-shot sync for recovery purposes.
 type mainEventSyncer struct {
 	db     *sql.DB
 	rpcURL string
