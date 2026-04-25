@@ -90,7 +90,7 @@ jobs:
           cache: true
 
       - name: Test
-        run: go test ./...
+        run: go test -race -timeout 120s -count=1 ./...
 
   internal-stellar:
     name: Internal (Go)

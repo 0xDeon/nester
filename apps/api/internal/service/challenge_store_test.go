@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -76,4 +78,49 @@ func TestInMemoryChallengeStore_IsolatesWallets(t *testing.T) {
 	gotB, err := store.GetAndDelete(ctx, "WALLET_B")
 	require.NoError(t, err)
 	assert.Equal(t, "bbbb", gotB)
+}
+
+// TestChallengeStore_ConcurrentAccess verifies that InMemoryChallengeStore is
+// safe for concurrent use. 100 goroutines each perform Set, GetAndDelete, and
+// a subsequent GetAndDelete (which must return ErrChallengeNotFound) without
+// data races. Run with -race to detect any mutex violations.
+func TestChallengeStore_ConcurrentAccess(t *testing.T) {
+	store := NewInMemoryChallengeStore(5 * time.Minute)
+	ctx := context.Background()
+
+	const goroutines = 100
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := range goroutines {
+		go func(i int) {
+			defer wg.Done()
+			wallet := fmt.Sprintf("CONCURRENT_WALLET_%d", i)
+			challenge := fmt.Sprintf("challenge_%d", i)
+
+			// Set a challenge for this wallet.
+			if err := store.Set(ctx, wallet, challenge); err != nil {
+				t.Errorf("goroutine %d: Set failed: %v", i, err)
+				return
+			}
+
+			// Retrieve and delete — must return the challenge we stored.
+			got, err := store.GetAndDelete(ctx, wallet)
+			if err != nil {
+				t.Errorf("goroutine %d: GetAndDelete failed: %v", i, err)
+				return
+			}
+			if got != challenge {
+				t.Errorf("goroutine %d: got %q, want %q", i, got, challenge)
+			}
+
+			// Second retrieval must return ErrChallengeNotFound (one-time use).
+			_, err = store.GetAndDelete(ctx, wallet)
+			if err == nil {
+				t.Errorf("goroutine %d: expected ErrChallengeNotFound on second GetAndDelete", i)
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
