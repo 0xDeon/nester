@@ -3,7 +3,8 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import {
     BarChart3,
     CandlestickChart,
@@ -107,6 +108,19 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
     const [walletMenuOpen, setWalletMenuOpen] = useState(false);
     const [copied, setCopied] = useState(false);
     const pathname = usePathname();
+    const drawerRef = useRef<HTMLDivElement>(null);
+
+    useFocusTrap(drawerRef, mobileOpen);
+
+    // ESC to close drawer
+    useEffect(() => {
+        if (!mobileOpen) return;
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setMobileOpen(false);
+        };
+        document.addEventListener("keydown", handleEsc);
+        return () => document.removeEventListener("keydown", handleEsc);
+    }, [mobileOpen]);
 
     useEffect(() => {
         if (!walletMenuOpen) return;
@@ -149,8 +163,11 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
                     {address && (
                         <div className="relative" onClick={(e) => e.stopPropagation()}>
                             <button
+                                aria-haspopup="menu"
+                                aria-expanded={walletMenuOpen}
+                                aria-controls="app-shell-wallet-menu"
                                 onClick={() => setWalletMenuOpen((prev) => !prev)}
-                                className="flex items-center gap-2 rounded-full border border-black/[0.08] px-4 py-2 shrink-0 transition-colors hover:border-black/20"
+                                className="flex items-center gap-2 rounded-full border border-black/[0.08] px-4 py-2 shrink-0 transition-colors hover:border-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                             >
                                 <div className="h-2 w-2 rounded-full bg-emerald-500" />
                                 <span className="text-[13px] font-medium text-black/60 font-mono">
@@ -162,34 +179,39 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
                             <AnimatePresence>
                                 {walletMenuOpen && (
                                     <motion.div
+                                        id="app-shell-wallet-menu"
+                                        role="menu"
                                         initial={{ opacity: 0, y: 6, scale: 0.97 }}
                                         animate={{ opacity: 1, y: 0, scale: 1 }}
                                         exit={{ opacity: 0, y: 6, scale: 0.97 }}
                                         transition={{ duration: 0.12 }}
                                         className="absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-xl border border-black/[0.08] bg-white shadow-lg z-50"
                                     >
-                                        <div className="px-4 py-3 border-b border-black/[0.06]">
+                                        <div className="px-4 py-3 border-b border-black/[0.06]" role="none">
                                             <p className="text-[11px] text-black/35">Connected Wallet</p>
                                             <p className="mt-0.5 text-[12px] font-mono text-black/60 truncate">{address}</p>
                                         </div>
                                         <div className="py-1">
                                             <button
+                                                role="menuitem"
                                                 onClick={copyAddress}
-                                                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-[13px] text-black/60 transition-colors hover:bg-black/[0.03] hover:text-black"
+                                                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-[13px] text-black/60 transition-colors hover:bg-black/[0.03] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                             >
                                                 <Copy className="h-3.5 w-3.5" />
                                                 {copied ? "Copied!" : "Copy Address"}
                                             </button>
                                             <Link
+                                                role="menuitem"
                                                 href="/portfolio"
-                                                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-[13px] text-black/60 transition-colors hover:bg-black/[0.03] hover:text-black"
+                                                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-[13px] text-black/60 transition-colors hover:bg-black/[0.03] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                             >
                                                 <User className="h-3.5 w-3.5" />
                                                 Portfolio
                                             </Link>
                                             <button
+                                                role="menuitem"
                                                 onClick={() => disconnect()}
-                                                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-[13px] text-red-500/70 transition-colors hover:bg-red-50 hover:text-red-600"
+                                                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-[13px] text-red-500/70 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                             >
                                                 <LogOut className="h-3.5 w-3.5" />
                                                 Disconnect
@@ -203,7 +225,9 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
                     {/* Mobile hamburger */}
                     <button
                         onClick={() => setMobileOpen(!mobileOpen)}
-                        className="lg:hidden flex h-[var(--touch-target)] w-[var(--touch-target)] items-center justify-center rounded-xl border border-black/[0.08] text-black/50 active:bg-black/5"
+                        className="lg:hidden flex h-[var(--touch-target)] w-[var(--touch-target)] items-center justify-center rounded-xl border border-black/[0.08] text-black/50 active:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+                        aria-expanded={mobileOpen}
                     >
                         {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                     </button>
@@ -222,6 +246,7 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
                             onClick={() => setMobileOpen(false)}
                         />
                         <motion.div
+                            ref={drawerRef}
                             initial={{ x: "100%" }}
                             animate={{ x: 0 }}
                             exit={{ x: "100%" }}
@@ -235,6 +260,9 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
                                 }
                             }}
                             className="fixed right-0 top-0 bottom-0 z-50 w-[280px] bg-white shadow-2xl lg:hidden flex flex-col"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-label="Navigation menu"
                         >
                             <div className="flex items-center justify-between p-4 border-b border-black/[0.06]">
                                 <span className="font-medium text-black">Menu</span>

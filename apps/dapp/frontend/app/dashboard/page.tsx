@@ -204,14 +204,15 @@ export default function Dashboard() {
                     ) : (
                         <div className="overflow-x-auto pb-2">
                             <table className="w-full text-left min-w-[600px]">
+                                <caption className="sr-only">Your active positions</caption>
                                 <thead>
                                     <tr className="border-b border-black/[0.05] text-[11px] text-black/35">
-                                        <th className="pb-3.5 pr-6 font-medium">Vault</th>
-                                        <th className="pb-3.5 pr-6 font-medium">Balance</th>
-                                        <th className="pb-3.5 pr-6 font-medium">APY</th>
-                                        <th className="pb-3.5 pr-6 font-medium">Yield</th>
-                                        <th className="pb-3.5 pr-6 font-medium">Status</th>
-                                        <th className="pb-3.5 font-medium"></th>
+                                        <th scope="col" className="pb-3.5 pr-6 font-medium">Vault</th>
+                                        <th scope="col" className="pb-3.5 pr-6 font-medium">Balance</th>
+                                        <th scope="col" className="pb-3.5 pr-6 font-medium">APY</th>
+                                        <th scope="col" className="pb-3.5 pr-6 font-medium">Yield</th>
+                                        <th scope="col" className="pb-3.5 pr-6 font-medium">Status</th>
+                                        <th scope="col" className="pb-3.5 font-medium"><span className="sr-only">Actions</span></th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -219,7 +220,7 @@ export default function Dashboard() {
                                         <tr key={position.id} className="border-b border-black/[0.04] last:border-0">
                                             <td className="py-4 pr-6">
                                                 <div className="flex items-center gap-3">
-                                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/[0.04] text-black/40">
+                                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/[0.04] text-black/40" aria-hidden="true">
                                                         {getVaultIcon(position.vaultName)}
                                                     </div>
                                                     <div>
@@ -250,7 +251,8 @@ export default function Dashboard() {
                                             <td className="py-4">
                                                 <button
                                                     onClick={() => setSelectedPosition(position)}
-                                                    className="flex min-h-[var(--touch-target)] sm:min-h-0 sm:py-1.5 items-center justify-center rounded-lg border border-black/[0.08] px-4 sm:px-3.5 text-[14px] sm:text-[12px] text-black/50 transition-colors hover:border-black/20 hover:text-black active:bg-black/5"
+                                                    aria-label={`Withdraw from ${position.vaultName}`}
+                                                    className="flex min-h-[var(--touch-target)] sm:min-h-0 sm:py-1.5 items-center justify-center rounded-lg border border-black/[0.08] px-4 sm:px-3.5 text-[14px] sm:text-[12px] text-black/50 transition-colors hover:border-black/20 hover:text-black active:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                                 >
                                                     Withdraw
                                                 </button>
@@ -378,12 +380,13 @@ function WalletBalanceTable({
     return (
         <div className="overflow-x-auto pb-2">
             <table className="w-full text-left min-w-[400px]">
+                <caption className="sr-only">Wallet Balance Details</caption>
                 <thead>
                     <tr className="border-b border-black/[0.05] text-[11px] text-black/35">
-                    <th className="pb-3.5 pr-6 font-medium">Asset</th>
-                    <th className="pb-3.5 pr-6 font-medium text-right">Balance</th>
-                    <th className="pb-3.5 pr-6 font-medium text-right">Price</th>
-                    <th className="pb-3.5 font-medium text-right">USD Value</th>
+                    <th scope="col" className="pb-3.5 pr-6 font-medium">Asset</th>
+                    <th scope="col" className="pb-3.5 pr-6 font-medium text-right">Balance</th>
+                    <th scope="col" className="pb-3.5 pr-6 font-medium text-right">Price</th>
+                    <th scope="col" className="pb-3.5 font-medium text-right">USD Value</th>
                 </tr>
             </thead>
             <tbody>

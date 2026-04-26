@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { validateAmount } from "@/lib/validation";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import {
     AlertCircle,
     CheckCircle2,
@@ -52,6 +53,19 @@ function ModalShell({
     subtitle: string;
     children: React.ReactNode;
 }) {
+    const modalRef = useRef<HTMLDivElement>(null);
+    useFocusTrap(modalRef, open);
+
+    // ESC to close
+    useEffect(() => {
+        if (!open) return;
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === "Escape") onClose();
+        };
+        document.addEventListener("keydown", handleEsc);
+        return () => document.removeEventListener("keydown", handleEsc);
+    }, [open, onClose]);
+
     return (
         <AnimatePresence>
             {open && (
@@ -63,6 +77,10 @@ function ModalShell({
                 >
                     <div className="flex h-full sm:min-h-full items-end sm:items-center justify-center">
                         <motion.div
+                            ref={modalRef}
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="modal-title"
                             initial={{ opacity: 0, y: 24, scale: 0.98 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -74,7 +92,7 @@ function ModalShell({
                                     <p className="text-xs font-mono uppercase tracking-[0.18em] text-muted-foreground">
                                         Vault Action
                                     </p>
-                                    <h2 className="mt-2 font-heading text-2xl font-light text-foreground">
+                                    <h2 id="modal-title" className="mt-2 font-heading text-2xl font-light text-foreground">
                                         {title}
                                     </h2>
                                     <p className="mt-1 text-sm text-muted-foreground">
@@ -83,7 +101,8 @@ function ModalShell({
                                 </div>
                                 <button
                                     onClick={onClose}
-                                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-border bg-white text-muted-foreground transition-colors hover:text-foreground active:bg-secondary"
+                                    aria-label="Close modal"
+                                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-border bg-white text-muted-foreground transition-colors hover:text-foreground active:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                 >
                                     <X className="h-5 w-5" />
                                 </button>

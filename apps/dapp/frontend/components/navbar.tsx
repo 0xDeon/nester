@@ -7,8 +7,9 @@ import { useWallet } from "@/components/wallet-provider";
 import { NotificationBell } from "@/components/notification-bell";
 import { truncateAddress, cn } from "@/lib/utils";
 import { LogOut, Copy, Check, ChevronDown, Menu, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNetwork } from "@/hooks/useNetwork";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { motion, AnimatePresence } from "framer-motion";
 
 const NAV_LINKS = [
@@ -27,6 +28,19 @@ export function Navbar() {
     const [showMenu, setShowMenu] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [isScrolled, setIsScrolled] = useState(false);
+    const drawerRef = useRef<HTMLDivElement>(null);
+
+    useFocusTrap(drawerRef, mobileOpen);
+
+    // ESC to close drawer
+    useEffect(() => {
+        if (!mobileOpen) return;
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setMobileOpen(false);
+        };
+        document.addEventListener("keydown", handleEsc);
+        return () => document.removeEventListener("keydown", handleEsc);
+    }, [mobileOpen]);
 
     useEffect(() => {
         const handleScroll = () => setIsScrolled(window.scrollY > 20);
@@ -129,8 +143,11 @@ export function Navbar() {
                                         onClick={(e) => e.stopPropagation()}
                                     >
                                         <button
+                                            aria-haspopup="menu"
+                                            aria-expanded={showMenu}
+                                            aria-controls="wallet-menu"
                                             onClick={() => setShowMenu(!showMenu)}
-                                            className="flex items-center gap-2 rounded-full border border-border bg-white px-4 py-2 transition-all hover:border-black/20 hover:shadow-sm"
+                                            className="flex items-center gap-2 rounded-full border border-border bg-white px-4 py-2 transition-all hover:border-black/20 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                         >
                                             <div className="h-2 w-2 rounded-full bg-emerald-500" />
                                             <span className="text-sm font-medium text-foreground font-mono">
@@ -147,36 +164,41 @@ export function Navbar() {
                                         <AnimatePresence>
                                             {showMenu && (
                                                 <motion.div
+                                                    id="wallet-menu"
+                                                    role="menu"
                                                     initial={{ opacity: 0, y: 8, scale: 0.96 }}
                                                     animate={{ opacity: 1, y: 0, scale: 1 }}
                                                     exit={{ opacity: 0, y: 8, scale: 0.96 }}
                                                     transition={{ duration: 0.15 }}
                                                     className="absolute right-0 top-full mt-2 w-64 rounded-2xl border border-border bg-white p-2 shadow-xl shadow-black/8"
                                                 >
-                                                    <div className="px-3 py-2 mb-1">
+                                                    <div className="px-3 py-2 mb-1" role="none">
                                                         <p className="text-xs text-muted-foreground mb-1">Connected Wallet</p>
                                                         <p className="text-sm font-mono text-foreground/70 break-all">
                                                             {truncateAddress(address, 10)}
                                                         </p>
                                                     </div>
                                                     <button
+                                                        role="menuitem"
                                                         onClick={copyAddress}
-                                                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-foreground/70 hover:bg-secondary hover:text-foreground transition-colors"
+                                                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-foreground/70 hover:bg-secondary hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                                     >
                                                         {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
                                                         {copied ? "Copied!" : "Copy Address"}
                                                     </button>
                                                     <Link
+                                                        role="menuitem"
                                                         href="/portfolio"
-                                                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-foreground/70 hover:bg-secondary hover:text-foreground transition-colors"
+                                                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-foreground/70 hover:bg-secondary hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                                         onClick={() => setShowMenu(false)}
                                                     >
                                                         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><polyline points="7 10 10 13 13 10 17 14"/></svg>
                                                         Portfolio
                                                     </Link>
                                                     <button
+                                                        role="menuitem"
                                                         onClick={() => { disconnect(); setShowMenu(false); }}
-                                                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                                                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-destructive hover:bg-destructive/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                                     >
                                                         <LogOut className="h-4 w-4" />
                                                         Disconnect
@@ -189,8 +211,9 @@ export function Navbar() {
                                     {/* Mobile hamburger */}
                                     <button
                                         onClick={() => setMobileOpen(!mobileOpen)}
-                                        className="md:hidden flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-white text-foreground/70 transition-colors hover:text-foreground active:bg-secondary/50"
-                                        aria-label="Toggle menu"
+                                        className="md:hidden flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-white text-foreground/70 transition-colors hover:text-foreground active:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                        aria-label={mobileOpen ? "Close menu" : "Open navigation menu"}
+                                        aria-expanded={mobileOpen}
                                     >
                                         {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                                     </button>
@@ -225,6 +248,7 @@ export function Navbar() {
 
                         {/* Slide-out Drawer */}
                         <motion.div
+                            ref={drawerRef}
                             initial={{ x: "100%" }}
                             animate={{ x: 0 }}
                             exit={{ x: "100%" }}
@@ -238,6 +262,9 @@ export function Navbar() {
                                 }
                             }}
                             className="fixed right-0 top-0 bottom-0 z-50 w-[280px] md:hidden bg-white shadow-2xl flex flex-col"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-label="Navigation menu"
                         >
                             <div className="flex items-center justify-between p-4 border-b border-border">
                                 <span className="font-heading font-medium text-foreground">Menu</span>
