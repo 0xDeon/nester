@@ -11,7 +11,6 @@ use nester_access_control::Role;
 use vault_token::{VaultTokenContract, VaultTokenContractClient};
 
 use crate::{FeeConfig, VaultContract, VaultContractClient, VaultStatus};
-use nester_access_control::Role;
 
 // ---------------------------------------------------------------------------
 // Helpers
