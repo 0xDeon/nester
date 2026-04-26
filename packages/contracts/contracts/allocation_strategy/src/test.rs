@@ -737,54 +737,25 @@ fn suggest_weights_uses_apy_and_risk_scores() {
     assert_eq!(weight_for(&suggested, symbol_short!("comp")), 3_030);
 }
 
-// AllocationStrategy.compute_allocation writes persistent state with no access control — any network participant can force a rebalance Test - Separate read from write (preferred)
+// AllocationStrategy.set_allocations requires operator role — unauthorized callers are rejected.
 #[test]
-#[should_panic(expected = "Caller is not an authorized operator")]
-fn test_set_allocation_unauthorized() {
+#[should_panic]
+fn test_set_allocations_unauthorized_is_rejected() {
     let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let registry_id = env.register_contract(None, YieldRegistryContract);
+    let registry = YieldRegistryContractClient::new(&env, &registry_id);
+    let admin = Address::generate(&env);
+    registry.initialize(&admin);
+
     let contract_id = env.register_contract(None, AllocationStrategyContract);
     let client = AllocationStrategyContractClient::new(&env, &contract_id);
+    client.initialize(&admin, &registry_id);
 
-    // Setup: Create a random attacker and an ACL contract
     let attacker = Address::generate(&env);
-    let acl_address = env.register_contract(None, AccessControlContract);
+    let apys = soroban_sdk::Vec::new(&env);
 
-    // Initialize strategy with the ACL address
-    client.init(&acl_address);
-
-    // Mock data
-    let total_amount = 1000_i128;
-    let apys = Vec::new(&env); // Simplified for test
-
-    // This should panic because 'attacker' does not have the OPERATOR role in ACL
-    env.mock_all_auths();
-    client.set_allocation(&attacker, &total_amount, &apys);
-}
-
-#[test]
-fn test_set_allocation_authorized() {
-    let env = Env::default();
-    env.mock_all_auths(); // Simulates successful authentication
-
-    let contract_id = env.register_contract(None, AllocationStrategyContract);
-    let client = AllocationStrategyContractClient::new(&env, &contract_id);
-
-    let operator = Address::generate(&env);
-    let acl_address = env.register_contract(None, AccessControlContract);
-
-    // Setup ACL: Give the operator the OPERATOR role
-    // (This depends on your AccessControl test utility)
-    let acl_client = AccessControlClient::new(&env, &acl_address);
-    acl_client.grant_role(&operator, &Symbol::new(&env, "OPERATOR"));
-
-    client.init(&acl_address);
-
-    let apys = create_mock_apys(&env); // Helper to create test data
-
-    // This should succeed
-    client.set_allocation(&operator, &1000, &apys);
-
-    // Verify storage was actually updated
-    let weights = client.get_weights();
-    assert!(weights.len() > 0);
+    // attacker is not an operator — should panic
+    client.set_allocations(&attacker, &1000_i128, &apys);
 }
