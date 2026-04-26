@@ -88,7 +88,7 @@ func (c *ContractInvoker) InvokeVoidFunction(ctx context.Context, contractAddres
 			},
 		},
 		BaseFee:       txnbuild.MinBaseFee,
-		Preconditions: txnbuild.Preconditions{TimeBounds: txnbuild.NewInfiniteTimeout()},
+		Preconditions: txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(int64((5 * time.Minute).Seconds()))},
 	})
 	if err != nil {
 		return fmt.Errorf("build transaction: %w", err)
@@ -298,6 +298,123 @@ func (c *ContractInvoker) getSequenceNumber(ctx context.Context) (int64, error) 
 		return 0, fmt.Errorf("parse sequence %q: %w", body.Sequence, err)
 	}
 	return seq, nil
+}
+
+// InvokeWithI128Pair calls a contract function with signature
+// (caller: Address, arg0: i128, arg1: i128). Suitable for deposit and withdraw
+// where the operator acts as the transaction source and user.
+func (c *ContractInvoker) InvokeWithI128Pair(ctx context.Context, contractAddress, functionName string, arg0, arg1 int64) error {
+	contractScAddr, err := contractAddressToXDR(contractAddress)
+	if err != nil {
+		return err
+	}
+
+	callerScAddr, err := accountAddressToXDR(c.kp.Address())
+	if err != nil {
+		return err
+	}
+
+	hostFn := xdr.HostFunction{
+		Type: xdr.HostFunctionTypeHostFunctionTypeInvokeContract,
+		InvokeContract: &xdr.InvokeContractArgs{
+			ContractAddress: contractScAddr,
+			FunctionName:    xdr.ScSymbol(functionName),
+			Args: []xdr.ScVal{
+				{Type: xdr.ScValTypeScvAddress, Address: &callerScAddr},
+				int64ToI128ScVal(arg0),
+				int64ToI128ScVal(arg1),
+			},
+		},
+	}
+
+	seq, err := c.getSequenceNumber(ctx)
+	if err != nil {
+		return fmt.Errorf("get sequence number: %w", err)
+	}
+
+	sourceAccount := txnbuild.NewSimpleAccount(c.kp.Address(), seq)
+
+	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
+		SourceAccount:        &sourceAccount,
+		IncrementSequenceNum: true,
+		Operations: []txnbuild.Operation{
+			&txnbuild.InvokeHostFunction{
+				HostFunction: hostFn,
+			},
+		},
+		BaseFee:       txnbuild.MinBaseFee,
+		Preconditions: txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(int64((5 * time.Minute).Seconds()))},
+	})
+	if err != nil {
+		return fmt.Errorf("build transaction: %w", err)
+	}
+
+	txB64, err := tx.Base64()
+	if err != nil {
+		return fmt.Errorf("encode transaction: %w", err)
+	}
+
+	simResult, err := c.simulate(ctx, txB64)
+	if err != nil {
+		return err
+	}
+
+	var sorobanData xdr.SorobanTransactionData
+	if err := xdr.SafeUnmarshalBase64(simResult.TransactionData, &sorobanData); err != nil {
+		return fmt.Errorf("decode soroban data: %w", err)
+	}
+
+	envelope := tx.ToXDR()
+	envelope.V1.Tx.Ext = xdr.TransactionExt{
+		V:           1,
+		SorobanData: &sorobanData,
+	}
+	minFee, _ := strconv.ParseInt(simResult.MinResourceFee, 10, 64)
+	envelope.V1.Tx.Fee = xdr.Uint32(txnbuild.MinBaseFee + minFee)
+
+	envB64, err := xdr.MarshalBase64(envelope)
+	if err != nil {
+		return fmt.Errorf("encode patched envelope: %w", err)
+	}
+
+	generic, err := txnbuild.TransactionFromXDR(envB64)
+	if err != nil {
+		return fmt.Errorf("parse patched tx: %w", err)
+	}
+
+	inner, ok := generic.Transaction()
+	if !ok {
+		return errors.New("expected a transaction, got fee-bump")
+	}
+
+	signed, err := inner.Sign(c.networkPassphrase, c.kp)
+	if err != nil {
+		return fmt.Errorf("sign transaction: %w", err)
+	}
+
+	signedB64, err := signed.Base64()
+	if err != nil {
+		return fmt.Errorf("encode signed transaction: %w", err)
+	}
+
+	hash, err := c.send(ctx, signedB64)
+	if err != nil {
+		return err
+	}
+
+	return c.waitForTx(ctx, hash)
+}
+
+func int64ToI128ScVal(n int64) xdr.ScVal {
+	hi := xdr.Int64(0)
+	lo := xdr.Uint64(uint64(n))
+	if n < 0 {
+		hi = xdr.Int64(-1)
+	}
+	return xdr.ScVal{
+		Type: xdr.ScValTypeScvI128,
+		I128: &xdr.Int128Parts{Hi: hi, Lo: lo},
+	}
 }
 
 // ── XDR helpers ───────────────────────────────────────────────────────────────

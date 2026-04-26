@@ -156,6 +156,7 @@ enum DataKey {
     EmergencyFeeBps,
     VaultLiquidReserves,
     EmergencyQueue,
+    LiquidReserved, // total amount committed to the emergency queue but not yet paid
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +252,19 @@ fn set_vault_liquid_reserves(env: &Env, amount: i128) {
     env.storage()
         .instance()
         .set(&DataKey::VaultLiquidReserves, &amount);
+}
+
+fn get_liquid_reserved(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::LiquidReserved)
+        .unwrap_or(0)
+}
+
+fn set_liquid_reserved(env: &Env, amount: i128) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LiquidReserved, &amount);
 }
 
 fn get_emergency_queue(env: &Env) -> soroban_sdk::Vec<EmergencyRequest> {
@@ -539,7 +553,6 @@ impl VaultContract {
 
     pub fn collect_fees(env: Env, caller: Address) {
         caller.require_auth();
-        // Allow ADMIN or MANAGER to collect fees
         if !AccessControl::has_role(&env, &caller, Role::Admin)
             && !AccessControl::has_role(&env, &caller, Role::Manager)
         {
@@ -549,33 +562,40 @@ impl VaultContract {
         accrue_management_fee(&env);
         let fees = get_accrued_fees(&env);
         if fees > 0 {
+            // Only transfer the portion of liquid reserves that is not already
+            // committed to the emergency queue, preventing over-drawing funds
+            // that are owed to queued withdrawal requests.
+            let current_reserves = get_vault_liquid_reserves(&env);
+            let reserved = get_liquid_reserved(&env);
+            let available = current_reserves.saturating_sub(reserved);
+            let collectable = fees.min(available);
+
+            if collectable == 0 {
+                return;
+            }
+
             let config = get_fee_config(&env);
             let token_address = self::VaultContract::get_token(env.clone());
 
             token::Client::new(&env, &token_address).transfer(
                 &env.current_contract_address(),
                 &config.treasury_address,
-                &fees,
+                &collectable,
             );
 
-            // Notify treasury - assuming it has receive_fees method
-            // We'll use a raw invoke to avoid dependency on Treasury client here for simplicity
-            // Or just rely on token transfer being enough if treasury tracks its own balance.
-            // The treasury contract I wrote has receive_fees(amount).
             env.invoke_contract::<()>(
                 &config.treasury_address,
                 &Symbol::new(&env, "receive_fees"),
-                (fees,).into_val(&env),
+                (collectable,).into_val(&env),
             );
 
-            set_accrued_fees(&env, 0);
+            set_accrued_fees(&env, fees - collectable);
 
             let total_assets = get_total_assets(&env);
-            set_total_assets(&env, total_assets - fees);
+            set_total_assets(&env, total_assets - collectable);
             sync_vault_token_total_assets(&env);
 
-            let current_reserves = get_vault_liquid_reserves(&env);
-            set_vault_liquid_reserves(&env, current_reserves - fees);
+            set_vault_liquid_reserves(&env, current_reserves - collectable);
         }
     }
 
@@ -653,6 +673,7 @@ impl VaultContract {
         }
 
         let mut liquid_reserves = get_vault_liquid_reserves(&env);
+        let mut liquid_reserved = get_liquid_reserved(&env);
         let token_address = self::VaultContract::get_token(env.clone());
         let contract_address = env.current_contract_address();
         let token_client = token::Client::new(&env, &token_address);
@@ -663,6 +684,8 @@ impl VaultContract {
             if liquid_reserves >= req.amount {
                 token_client.transfer(&contract_address, &req.user, &req.amount);
                 liquid_reserves -= req.amount;
+                // Release the reservation now that the payment has been made.
+                liquid_reserved = liquid_reserved.saturating_sub(req.amount);
 
                 emit_event(
                     &env,
@@ -687,6 +710,7 @@ impl VaultContract {
         }
 
         set_vault_liquid_reserves(&env, liquid_reserves);
+        set_liquid_reserved(&env, liquid_reserved);
         set_emergency_queue(&env, &new_queue);
     }
 
@@ -871,6 +895,11 @@ impl VaultContract {
                 amount: return_amount,
             });
             set_emergency_queue(&env, &queue);
+
+            // Reserve these funds so collect_fees cannot draw them away
+            // before the queued request is processed.
+            let currently_reserved = get_liquid_reserved(&env);
+            set_liquid_reserved(&env, currently_reserved + return_amount);
 
             let position = queue.len();
             emit_event(

@@ -79,6 +79,7 @@ func run() error {
 			return fmt.Errorf("init chain invoker: %w", err)
 		}
 		chainInvoker = inv
+		vaultService.SetDepositInvoker(inv)
 	}
 
 	adminService := service.NewAdminService(

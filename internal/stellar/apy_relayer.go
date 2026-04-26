@@ -5,11 +5,69 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// validProtocolID matches safe protocol identifiers (alphanumeric, dash, underscore, 1–64 chars).
+var validProtocolID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// privateIPBlocks lists all RFC-reserved private and loopback ranges used for SSRF prevention.
+var privateIPBlocks = func() []*net.IPNet {
+	blocks := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"127.0.0.0/8",
+		"::1/128",
+		"fc00::/7",
+		"169.254.0.0/16", // link-local / AWS IMDS
+	}
+	nets := make([]*net.IPNet, 0, len(blocks))
+	for _, b := range blocks {
+		_, network, _ := net.ParseCIDR(b)
+		nets = append(nets, network)
+	}
+	return nets
+}()
+
+func isPrivateIP(ip net.IP) bool {
+	for _, block := range privateIPBlocks {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// ssrfSafeTransport returns an *http.Transport whose DialContext blocks requests
+// to private/loopback IP ranges to prevent SSRF.
+func ssrfSafeTransport() *http.Transport {
+	dialer := &net.Dialer{}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid address %q: %w", addr, err)
+			}
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+			if err != nil {
+				return nil, fmt.Errorf("DNS lookup failed for %q: %w", host, err)
+			}
+			for _, ip := range ips {
+				if isPrivateIP(ip) {
+					return nil, fmt.Errorf("SSRF protection: blocked request to private/reserved IP %s", ip)
+				}
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+}
 
 const defaultAPYStalenessThreshold = time.Hour
 
@@ -313,19 +371,39 @@ type protocolAPYResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-func NewProtocolRPCClient(httpClient *http.Client, baseURL string) *ProtocolRPCClient {
+func NewProtocolRPCClient(httpClient *http.Client, baseURL string) (*ProtocolRPCClient, error) {
+	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if trimmed == "" {
+		return nil, errors.New("protocol RPC base URL is required")
+	}
+
+	parsed, err := url.ParseRequestURI(trimmed)
+	if err != nil || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid protocol RPC base URL %q: must be a valid absolute URL", trimmed)
+	}
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf("protocol RPC base URL must use HTTPS, got scheme %q", parsed.Scheme)
+	}
+
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Second}
+		httpClient = &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: ssrfSafeTransport(),
+		}
 	}
 	return &ProtocolRPCClient{
-		baseURL:    strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		baseURL:    trimmed,
 		httpClient: httpClient,
-	}
+	}, nil
 }
 
 func (c *ProtocolRPCClient) FetchProtocolAPY(ctx context.Context, protocolID string) (APYSnapshot, error) {
-	url := fmt.Sprintf("%s/v1/protocols/%s/apy", c.baseURL, protocolID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if !validProtocolID.MatchString(protocolID) {
+		return APYSnapshot{}, fmt.Errorf("invalid protocolID format: %q — must match [a-zA-Z0-9_-]{1,64}", protocolID)
+	}
+
+	apiURL := fmt.Sprintf("%s/v1/protocols/%s/apy", c.baseURL, url.PathEscape(protocolID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return APYSnapshot{}, err
 	}
@@ -337,7 +415,7 @@ func (c *ProtocolRPCClient) FetchProtocolAPY(ctx context.Context, protocolID str
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return APYSnapshot{}, fmt.Errorf("protocol RPC returned status %d for %s", resp.StatusCode, protocolID)
+		return APYSnapshot{}, fmt.Errorf("protocol RPC returned status %d for %q", resp.StatusCode, protocolID)
 	}
 
 	var payload protocolAPYResponse

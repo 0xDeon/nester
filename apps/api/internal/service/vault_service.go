@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,8 +12,24 @@ import (
 	"github.com/suncrestlabs/nester/apps/api/internal/domain/vault"
 )
 
+// VaultDepositInvoker handles on-chain deposit and withdrawal operations.
+// Implementations invoke the Soroban vault contract; the noop is used when
+// no operator secret is configured.
+type VaultDepositInvoker interface {
+	DepositToVault(ctx context.Context, contractAddress string, amountStroops int64) error
+	WithdrawFromVault(ctx context.Context, contractAddress string, sharesStroops int64) error
+}
+
+// NoopVaultDepositInvoker satisfies VaultDepositInvoker without making any
+// on-chain calls. Used when chain integration is not configured.
+type NoopVaultDepositInvoker struct{}
+
+func (NoopVaultDepositInvoker) DepositToVault(_ context.Context, _ string, _ int64) error    { return nil }
+func (NoopVaultDepositInvoker) WithdrawFromVault(_ context.Context, _ string, _ int64) error { return nil }
+
 type VaultService struct {
-	repository vault.Repository
+	repository     vault.Repository
+	depositInvoker VaultDepositInvoker
 }
 
 // ── Input types ──────────────────────────────────────────────────────────────
@@ -56,6 +73,12 @@ type RecordWithdrawalInput struct {
 
 func NewVaultService(repository vault.Repository) *VaultService {
 	return &VaultService{repository: repository}
+}
+
+// SetDepositInvoker wires an optional on-chain invoker into the vault service.
+// Call this after NewVaultService when an operator key is available.
+func (s *VaultService) SetDepositInvoker(invoker VaultDepositInvoker) {
+	s.depositInvoker = invoker
 }
 
 // ── Existing methods ─────────────────────────────────────────────────────────
@@ -150,6 +173,17 @@ func (s *VaultService) RecordDeposit(ctx context.Context, input RecordDepositInp
 	}
 	if decimalScale(input.Amount) > vault.MaxAmountScale {
 		return vault.Vault{}, vault.ErrInvalidPrecision
+	}
+
+	if s.depositInvoker != nil {
+		existing, err := s.repository.GetVault(ctx, input.VaultID)
+		if err != nil {
+			return vault.Vault{}, err
+		}
+		stroops := input.Amount.Mul(decimal.NewFromInt(10_000_000)).IntPart()
+		if err := s.depositInvoker.DepositToVault(ctx, existing.ContractAddress, stroops); err != nil {
+			return vault.Vault{}, fmt.Errorf("on-chain deposit failed: %w", err)
+		}
 	}
 
 	if err := s.repository.RecordDeposit(ctx, input.VaultID, input.Amount); err != nil {
@@ -338,6 +372,13 @@ func (s *VaultService) RecordWithdrawal(ctx context.Context, input RecordWithdra
 	}
 	if existing.CurrentBalance.LessThan(input.Amount) {
 		return vault.Vault{}, vault.ErrInsufficientBalance
+	}
+
+	if s.depositInvoker != nil {
+		stroops := input.Amount.Mul(decimal.NewFromInt(10_000_000)).IntPart()
+		if err := s.depositInvoker.WithdrawFromVault(ctx, existing.ContractAddress, stroops); err != nil {
+			return vault.Vault{}, fmt.Errorf("on-chain withdrawal failed: %w", err)
+		}
 	}
 
 	if err := s.repository.RecordWithdrawal(ctx, input.VaultID, input.Amount); err != nil {
