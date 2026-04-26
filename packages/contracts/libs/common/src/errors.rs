@@ -14,4 +14,10 @@ pub enum ContractError {
     InvalidOperation = 9,
     ExceedsLimit = 10,
     CircuitBreakerTriggered = 11,
+    TimelockNotReady = 12,
+    TimelockExpired = 13,
+    TimelockNotFound = 14,
+    TimelockInvalidDelay = 15,
+    TimelockAlreadyExecuted = 16,
+    SlippageExceeded = 17,
 }

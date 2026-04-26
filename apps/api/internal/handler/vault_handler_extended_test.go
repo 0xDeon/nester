@@ -18,6 +18,14 @@ import (
 	"github.com/suncrestlabs/nester/apps/api/internal/service"
 )
 
+// errorResponse matches the error response structure returned by the API
+type errorResponse struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 func TestVaultHandlerGetVaultReturns200WithAllocations(t *testing.T) {
 	userID := uuid.New()
 	repository := newHandlerRepository(userID)
@@ -26,11 +34,11 @@ func TestVaultHandlerGetVaultReturns200WithAllocations(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
 	// Create vault
-	body := bytes.NewBufferString(`{"user_id":"` + userID.String() + `","contract_address":"CA-GET-ALLOC-001","currency":"USDC"}`)
+	body := bytes.NewBufferString(`{"contract_address":"CA-GET-ALLOC-001","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -41,10 +49,7 @@ func TestVaultHandlerGetVaultReturns200WithAllocations(t *testing.T) {
 		t.Fatalf("expected status 201, got %d", response.StatusCode)
 	}
 
-	var created vault.Vault
-	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created := decodeAPIData[vault.Vault](t, response.Body)
 
 	// Add allocations
 	_, err = vaultService.UpdateAllocations(context.Background(), service.UpdateAllocationsInput{
@@ -57,22 +62,12 @@ func TestVaultHandlerGetVaultReturns200WithAllocations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateAllocations() error = %v", err)
 	}
-
-	// Get vault with allocations
 	getResponse, err := http.Get(server.URL + "/api/v1/vaults/" + created.ID.String())
 	if err != nil {
 		t.Fatalf("GET /api/v1/vaults/{id} error = %v", err)
 	}
 	defer getResponse.Body.Close()
-
-	if getResponse.StatusCode != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", getResponse.StatusCode)
-	}
-
-	var fetched vault.Vault
-	if err := json.NewDecoder(getResponse.Body).Decode(&fetched); err != nil {
-		t.Fatalf("decode get response: %v", err)
-	}
+	fetched := decodeAPIData[vault.Vault](t, getResponse.Body)
 
 	if fetched.ID != created.ID {
 		t.Fatalf("fetched ID = %v, want %v", fetched.ID, created.ID)
@@ -101,7 +96,7 @@ func TestVaultHandlerGetVaultReturns404WhenNotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(uuid.New())(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
 	// Get non-existent vault
@@ -120,7 +115,7 @@ func TestVaultHandlerGetVaultReturns404WhenNotFound(t *testing.T) {
 		t.Fatalf("decode error response: %v", err)
 	}
 
-	if errorResp.Error == "" {
+	if errorResp.Error.Message == "" {
 		t.Fatal("error response should have error message")
 	}
 }
@@ -132,7 +127,7 @@ func TestVaultHandlerGetVaultReturns400ForInvalidID(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(uuid.New())(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
 	// Get vault with invalid ID
@@ -155,21 +150,18 @@ func TestVaultHandlerListUserVaultsReturns200WithAllocations(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
 	// Create first vault with allocations
-	body1 := bytes.NewBufferString(`{"user_id":"` + userID.String() + `","contract_address":"CA-LIST-001","currency":"USDC"}`)
+	body1 := bytes.NewBufferString(`{"contract_address":"CA-LIST-001","currency":"USDC"}`)
 	response1, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body1)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
 	}
 	defer response1.Body.Close()
 
-	var created1 vault.Vault
-	if err := json.NewDecoder(response1.Body).Decode(&created1); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created1 := decodeAPIData[vault.Vault](t, response1.Body)
 
 	_, err = vaultService.UpdateAllocations(context.Background(), service.UpdateAllocationsInput{
 		VaultID: created1.ID,
@@ -182,17 +174,14 @@ func TestVaultHandlerListUserVaultsReturns200WithAllocations(t *testing.T) {
 	}
 
 	// Create second vault with allocations
-	body2 := bytes.NewBufferString(`{"user_id":"` + userID.String() + `","contract_address":"CA-LIST-002","currency":"USDC"}`)
+	body2 := bytes.NewBufferString(`{"contract_address":"CA-LIST-002","currency":"USDC"}`)
 	response2, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body2)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
 	}
 	defer response2.Body.Close()
 
-	var created2 vault.Vault
-	if err := json.NewDecoder(response2.Body).Decode(&created2); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created2 := decodeAPIData[vault.Vault](t, response2.Body)
 
 	_, err = vaultService.UpdateAllocations(context.Background(), service.UpdateAllocationsInput{
 		VaultID: created2.ID,
@@ -216,10 +205,7 @@ func TestVaultHandlerListUserVaultsReturns200WithAllocations(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", listResponse.StatusCode)
 	}
 
-	var vaults []vault.Vault
-	if err := json.NewDecoder(listResponse.Body).Decode(&vaults); err != nil {
-		t.Fatalf("decode list response: %v", err)
-	}
+	vaults := decodeAPIData[[]vault.Vault](t, listResponse.Body)
 
 	if len(vaults) != 2 {
 		t.Fatalf("fetched %d vaults, want 2", len(vaults))
@@ -247,10 +233,10 @@ func TestVaultHandlerCreateVaultReturns201OnSuccess(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"user_id":"` + userID.String() + `","contract_address":"CA-CREATE-001","currency":"USDC"}`)
+	body := bytes.NewBufferString(`{"contract_address":"CA-CREATE-001","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -261,10 +247,7 @@ func TestVaultHandlerCreateVaultReturns201OnSuccess(t *testing.T) {
 		t.Fatalf("expected status 201, got %d", response.StatusCode)
 	}
 
-	var created vault.Vault
-	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created := decodeAPIData[vault.Vault](t, response.Body)
 
 	if created.ID == uuid.Nil {
 		t.Fatal("created vault should have non-nil ID")
@@ -291,7 +274,7 @@ func TestVaultHandlerCreateVaultReturns422OnInvalidInput(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
 	tests := []struct {
@@ -300,38 +283,28 @@ func TestVaultHandlerCreateVaultReturns422OnInvalidInput(t *testing.T) {
 		expectedStatus int
 	}{
 		{
-			name:           "invalid JSON",
-			body:           `{"user_id":"` + userID.String() + `","contract_address":"CA-001"`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "invalid user_id",
-			body:           `{"user_id":"not-a-uuid","contract_address":"CA-001","currency":"USDC"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
 			name:           "empty contract_address",
-			body:           `{"user_id":"` + userID.String() + `","contract_address":"","currency":"USDC"}`,
+			body:           `{"contract_address":"","currency":"USDC"}`,
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "invalid currency",
-			body:           `{"user_id":"` + userID.String() + `","contract_address":"CA-001","currency":"INVALID"}`,
+			body:           `{"contract_address":"CA-001","currency":"INVALID"}`,
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "currency too short",
-			body:           `{"user_id":"` + userID.String() + `","contract_address":"CA-001","currency":"US"}`,
+			body:           `{"contract_address":"CA-001","currency":"US"}`,
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "currency too long",
-			body:           `{"user_id":"` + userID.String() + `","contract_address":"CA-001","currency":"USDCX"}`,
+			body:           `{"contract_address":"CA-001","currency":"USDCX"}`,
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "currency with numbers",
-			body:           `{"user_id":"` + userID.String() + `","contract_address":"CA-001","currency":"US1C"}`,
+			body:           `{"contract_address":"CA-001","currency":"US1C"}`,
 			expectedStatus: http.StatusBadRequest,
 		},
 	}
@@ -359,12 +332,12 @@ func TestVaultHandlerCreateVaultReturns404ForNonExistentUser(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
-	defer server.Close()
-
 	// Try to create vault for non-existent user
 	nonExistentUserID := uuid.New()
-	body := bytes.NewBufferString(`{"user_id":"` + nonExistentUserID.String() + `","contract_address":"CA-001","currency":"USDC"}`)
+	server := httptest.NewServer(fakeAuthMiddleware(nonExistentUserID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
+	defer server.Close()
+
+	body := bytes.NewBufferString(`{"contract_address":"CA-001","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -383,7 +356,7 @@ func TestVaultHandlerListUserVaultsReturns400ForInvalidUserID(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(uuid.New())(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
 	// List vaults with invalid user ID
@@ -406,10 +379,10 @@ func TestVaultHandlerCreateVaultWithCustomStatus(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"user_id":"` + userID.String() + `","contract_address":"CA-STATUS-001","currency":"USDC","status":"paused"}`)
+	body := bytes.NewBufferString(`{"contract_address":"CA-STATUS-001","currency":"USDC","status":"paused"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -420,10 +393,7 @@ func TestVaultHandlerCreateVaultWithCustomStatus(t *testing.T) {
 		t.Fatalf("expected status 201, got %d", response.StatusCode)
 	}
 
-	var created vault.Vault
-	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created := decodeAPIData[vault.Vault](t, response.Body)
 
 	if created.Status != vault.StatusPaused {
 		t.Fatalf("created vault Status = %q, want %q", created.Status, vault.StatusPaused)
@@ -438,10 +408,10 @@ func TestVaultHandlerCreateVaultNormalizesCurrency(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"user_id":"` + userID.String() + `","contract_address":"CA-NORM-001","currency":"usdc"}`)
+	body := bytes.NewBufferString(`{"contract_address":"CA-NORM-001","currency":"usdc"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -452,10 +422,7 @@ func TestVaultHandlerCreateVaultNormalizesCurrency(t *testing.T) {
 		t.Fatalf("expected status 201, got %d", response.StatusCode)
 	}
 
-	var created vault.Vault
-	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created := decodeAPIData[vault.Vault](t, response.Body)
 
 	if created.Currency != "USDC" {
 		t.Fatalf("created vault Currency = %q, want %q", created.Currency, "USDC")
@@ -470,10 +437,10 @@ func TestVaultHandlerCreateVaultTrimsWhitespace(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"user_id":"` + userID.String() + `","contract_address":"  CA-TRIM-001  ","currency":"  USDC  "}`)
+	body := bytes.NewBufferString(`{"contract_address":"  CA-TRIM-001  ","currency":"  USDC  "}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -484,10 +451,7 @@ func TestVaultHandlerCreateVaultTrimsWhitespace(t *testing.T) {
 		t.Fatalf("expected status 201, got %d", response.StatusCode)
 	}
 
-	var created vault.Vault
-	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created := decodeAPIData[vault.Vault](t, response.Body)
 
 	if created.ContractAddress != "CA-TRIM-001" {
 		t.Fatalf("created vault ContractAddress = %q, want %q", created.ContractAddress, "CA-TRIM-001")
@@ -505,11 +469,11 @@ func TestVaultHandler_GetAllocations_Returns200(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
 	// Create vault
-	body := bytes.NewBufferString(`{"user_id":"` + userID.String() + `","contract_address":"CA-ALLOC-GET-001","currency":"USDC"}`)
+	body := bytes.NewBufferString(`{"contract_address":"CA-ALLOC-GET-001","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -520,10 +484,7 @@ func TestVaultHandler_GetAllocations_Returns200(t *testing.T) {
 		t.Fatalf("expected status 201, got %d", response.StatusCode)
 	}
 
-	var created vault.Vault
-	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created := decodeAPIData[vault.Vault](t, response.Body)
 
 	// Add allocations
 	_, err = vaultService.UpdateAllocations(context.Background(), service.UpdateAllocationsInput{
@@ -548,10 +509,7 @@ func TestVaultHandler_GetAllocations_Returns200(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", getResponse.StatusCode)
 	}
 
-	var allocations []vault.Allocation
-	if err := json.NewDecoder(getResponse.Body).Decode(&allocations); err != nil {
-		t.Fatalf("decode allocations response: %v", err)
-	}
+	allocations := decodeAPIData[[]vault.Allocation](t, getResponse.Body)
 
 	if len(allocations) != 2 {
 		t.Fatalf("got %d allocations, want 2", len(allocations))
@@ -577,7 +535,7 @@ func TestVaultHandler_GetAllocations_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	server := httptest.NewServer(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux))
+	server := httptest.NewServer(fakeAuthMiddleware(uuid.New())(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
 	// Get allocations for non-existent vault
@@ -596,7 +554,7 @@ func TestVaultHandler_GetAllocations_NotFound(t *testing.T) {
 		t.Fatalf("decode error response: %v", err)
 	}
 
-	if errorResp.Error == "" {
+	if errorResp.Error.Message == "" {
 		t.Fatal("error response should have error message")
 	}
 }

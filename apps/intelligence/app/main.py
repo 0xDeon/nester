@@ -9,7 +9,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from app.routers import health, chat, analyze
+from app.routers import analyze, chat, health
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -39,11 +39,5 @@ async def add_process_time_header(request: Request, call_next):
     return response
 
 app.include_router(health.router)
-app.include_router(chat.router)
+app.include_router(chat.router, prefix="/intelligence")
 app.include_router(analyze.router)
-
-@app.on_event("startup")
-async def startup_event():
-    # Apply rate limits to AI endpoints
-    limiter.limit("20/minute")(chat.chat_endpoint)
-    limiter.limit("5/minute")(analyze.analyze_endpoint)

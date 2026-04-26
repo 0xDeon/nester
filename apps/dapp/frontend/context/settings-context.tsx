@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { config } from "@/lib/config";
 
 export type Currency = "USD" | "GBP" | "EUR" | "NGN";
 
@@ -15,7 +16,7 @@ export const EXCHANGE_RATES: Record<Currency, number> = {
     USD: 1,
     GBP: 0.79,
     EUR: 0.92,
-    NGN: 1530,
+    NGN: config.defaultNgnRate,
 };
 
 interface SettingsContextType {
@@ -34,7 +35,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const savedCurrency = localStorage.getItem("nester_currency") as Currency;
         if (savedCurrency && EXCHANGE_RATES[savedCurrency]) {
-            setCurrencyState(savedCurrency);
+            // Avoid calling setState directly
+            const timer = setTimeout(() => {
+                setCurrencyState(savedCurrency);
+            }, 0);
+            return () => clearTimeout(timer);
         }
     }, []);
 
@@ -57,10 +62,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     const exchangeRate = EXCHANGE_RATES[currency];
 
     return (
-        <SettingsContext.Provider 
-            value={{ 
-                currency, 
-                setCurrency, 
+        <SettingsContext.Provider
+            value={{
+                currency,
+                setCurrency,
                 formatValue,
                 exchangeRate
             }}

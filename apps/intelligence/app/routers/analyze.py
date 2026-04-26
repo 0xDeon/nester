@@ -1,34 +1,44 @@
-from typing import Optional, Dict, Any
-from pydantic import BaseModel
-from fastapi import APIRouter, Request, HTTPException
+"""Structured analysis endpoints — insights, sentiment, vault recommendations."""
 
-from app.services.claude import get_claude_response
-from app.services.prometheus import construct_system_message, filter_ai_output
+from typing import Any
 
-router = APIRouter(prefix="/analyze", tags=["AI"])
+from fastapi import APIRouter, Depends, HTTPException, status
 
-class AnalyzeRequest(BaseModel):
-    data: Dict[str, Any]
-    analysis_type: str = "portfolio"
+from app.dependencies.auth import verify_jwt
+from app.services.prometheus import (
+    get_market_sentiment,
+    get_portfolio_insights,
+    get_vault_recommendations,
+)
 
-@router.post("")
-async def analyze_endpoint(request: Request, body: AnalyzeRequest):
-    # Construct a prompt specifically for structured analysis
-    system_message = construct_system_message(body.data)
-    user_message = f"Please provide a structured analysis of this {body.analysis_type} data. Return only JSON."
-    
-    try:
-        response = await get_claude_response(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=2048,
-            system=system_message,
-            messages=[{"role": "user", "content": user_message}]
+router = APIRouter(dependencies=[Depends(verify_jwt)])
+
+
+@router.get("/portfolio/{user_id}/insights")
+async def portfolio_insights(
+    user_id: str,
+    claims: dict[str, Any] = Depends(verify_jwt),
+) -> list[dict[str, Any]]:
+    """Return AI-generated portfolio insight cards for a user.
+
+    The path ``user_id`` must match the authenticated subject to prevent
+    one user querying another's insights.
+    """
+    if claims.get("sub") != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorised to access this user's insights",
         )
-        
-        content = response.content[0].text
-        # We assume Claude returns JSON as requested
-        # In a real system, we might use Claude's tool use or structured output features
-        return {"analysis": filter_ai_output(content)}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await get_portfolio_insights(user_id)
+
+
+@router.get("/market/sentiment")
+async def market_sentiment() -> dict[str, Any]:
+    """Return current market sentiment for the Stellar DeFi / stablecoin space."""
+    return await get_market_sentiment()
+
+
+@router.get("/vaults/{vault_id}/recommendations")
+async def vault_recommendations(vault_id: str) -> dict[str, Any]:
+    """Return AI commentary and recommendations for a specific vault."""
+    return await get_vault_recommendations(vault_id)

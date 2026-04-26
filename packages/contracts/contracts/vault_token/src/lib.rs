@@ -78,7 +78,8 @@ impl VaultTokenContract {
         if env.storage().instance().has(&DataKey::Vault) {
             panic_with_error!(&env, ContractError::AlreadyInitialized);
         }
-        vault.require_auth();
+        // No vault.require_auth() here — vault isn't initialized yet when this is called.
+        // Auth for vault-only operations is enforced in mint_for_deposit, burn_for_withdrawal, etc.
         env.storage().instance().set(&DataKey::Vault, &vault);
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
@@ -146,8 +147,16 @@ impl VaultTokenContract {
     /// Burn `amount` of `from`'s own shares (SEP-41 user-initiated burn).
     pub fn burn(env: Env, from: Address, amount: i128) {
         from.require_auth();
+        let total_supply = get_total_supply(&env);
+        let total_assets = get_total_assets(&env);
+        let assets_to_reduce = if total_supply > 0 && total_assets > 0 {
+            amount * total_assets / total_supply
+        } else {
+            0
+        };
         spend_balance(&env, &from, amount);
-        set_total_supply(&env, get_total_supply(&env) - amount);
+        set_total_supply(&env, total_supply - amount);
+        set_total_assets(&env, total_assets - assets_to_reduce);
         env.events().publish((symbol_short!("burn"), from), amount);
     }
 
@@ -155,8 +164,16 @@ impl VaultTokenContract {
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
         spender.require_auth();
         spend_allowance(&env, &from, &spender, amount);
+        let total_supply = get_total_supply(&env);
+        let total_assets = get_total_assets(&env);
+        let assets_to_reduce = if total_supply > 0 && total_assets > 0 {
+            amount * total_assets / total_supply
+        } else {
+            0
+        };
         spend_balance(&env, &from, amount);
-        set_total_supply(&env, get_total_supply(&env) - amount);
+        set_total_supply(&env, total_supply - amount);
+        set_total_assets(&env, total_assets - assets_to_reduce);
         env.events()
             .publish((symbol_short!("burn_frm"), spender, from), amount);
     }

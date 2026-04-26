@@ -39,6 +39,7 @@ var (
 	ErrInvalidStatus         = errors.New("invalid settlement status")
 	ErrInvalidTransition     = errors.New("invalid status transition")
 	ErrInvalidPrecision      = errors.New("decimal precision exceeds supported scale")
+	ErrForbidden             = errors.New("caller does not own this settlement")
 )
 
 const MaxAmountScale = int32(8)
