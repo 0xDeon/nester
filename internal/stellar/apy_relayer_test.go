@@ -120,11 +120,13 @@ func TestAPYRelayerRunOnceMergesNewestQuotePerProtocol(t *testing.T) {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 
-	if updater.calls["aave"] != 540 {
-		t.Fatalf("aave APY update = %d, want 540", updater.calls["aave"])
+	// Expect median of [510,540] == 525
+	if updater.calls["aave"] != 525 {
+		t.Fatalf("aave APY update = %d, want 525", updater.calls["aave"])
 	}
-	if updater.calls["blend"] != 700 {
-		t.Fatalf("blend APY update = %d, want 700", updater.calls["blend"])
+	// blend had only one source -> insufficient (minSources=2), no update expected
+	if _, ok := updater.calls["blend"]; ok {
+		t.Fatalf("expected no blend update due to insufficient sources, got %d", updater.calls["blend"])
 	}
 }
 
@@ -155,7 +157,8 @@ func TestAPYRelayerRunOnceReturnsSourceErrorButAppliesOtherUpdates(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewAPYRelayer() error = %v", err)
 	}
-
+	// Allow single-source updates for this test to preserve original expectation
+	relayer.minSources = 1
 	runErr := relayer.RunOnce(context.Background())
 	if runErr == nil {
 		t.Fatal("expected RunOnce() to return source collection error")
