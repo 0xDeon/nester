@@ -52,7 +52,7 @@ func (r *VaultRepository) CreateVault(ctx context.Context, model vault.Vault) (v
 
 func (r *VaultRepository) GetVault(ctx context.Context, id uuid.UUID) (vault.Vault, error) {
 	query := `
-		SELECT id, user_id, contract_address, total_deposited, current_balance, currency, status, created_at, updated_at
+		SELECT id, user_id, contract_address, total_deposited, current_balance, currency, status, yield_earned, fees_paid, last_synced_at, deleted_at, created_at, updated_at
 		FROM vaults
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -73,7 +73,7 @@ func (r *VaultRepository) GetVault(ctx context.Context, id uuid.UUID) (vault.Vau
 
 func (r *VaultRepository) GetUserVaults(ctx context.Context, userID uuid.UUID) ([]vault.Vault, error) {
 	query := `
-		SELECT id, user_id, contract_address, total_deposited, current_balance, currency, status, created_at, updated_at
+		SELECT id, user_id, contract_address, total_deposited, current_balance, currency, status, yield_earned, fees_paid, last_synced_at, deleted_at, created_at, updated_at
 		FROM vaults
 		WHERE user_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC

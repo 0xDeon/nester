@@ -321,8 +321,9 @@ fn vault_accepts_deposit_after_unpause() {
     assert!(!h.vault().is_paused());
 
     // Mint deposit tokens so the real transfer inside deposit() succeeds.
-    h.mint_deposit_tokens(&user, 1_000);
-    h.vault().deposit(&user, &100, &0);
+    // MIN_DEPOSIT_AMOUNT is 10_000_000 (1 unit in 7 decimals).
+    h.mint_deposit_tokens(&user, 20_000_000);
+    h.vault().deposit(&user, &10_000_000, &0);
 }
 
 #[test]
@@ -441,16 +442,17 @@ fn vault_deposit_and_withdraw_syncs_vault_token_supply() {
     let h = NesterHarness::setup();
     let user = h.create_user();
 
-    h.mint_deposit_tokens(&user, 2_000);
-    let user_shares = h.vault().deposit(&user, &1_000, &0);
-    assert_eq!(user_shares, 1_000);
-    assert_eq!(h.token().balance(&user), 1_000);
-    assert_eq!(h.token().total_supply(), 1_000);
-    assert_eq!(h.token().total_assets(), 1_000);
+    // MIN_DEPOSIT_AMOUNT is 10_000_000 (1 unit in 7 decimals).
+    h.mint_deposit_tokens(&user, 20_000_000);
+    let user_shares = h.vault().deposit(&user, &10_000_000, &0);
+    assert_eq!(user_shares, 10_000_000);
+    assert_eq!(h.token().balance(&user), 10_000_000);
+    assert_eq!(h.token().total_supply(), 10_000_000);
+    assert_eq!(h.token().total_assets(), 10_000_000);
 
     // Partial withdraw burns shares in the vault-token contract.
-    let remaining = h.vault().withdraw(&user, &400, &0);
-    assert_eq!(remaining, 600);
-    assert_eq!(h.token().balance(&user), 600);
-    assert_eq!(h.token().total_supply(), 600);
+    let remaining = h.vault().withdraw(&user, &4_000_000, &0);
+    assert_eq!(remaining, 6_000_000);
+    assert_eq!(h.token().balance(&user), 6_000_000);
+    assert_eq!(h.token().total_supply(), 6_000_000);
 }

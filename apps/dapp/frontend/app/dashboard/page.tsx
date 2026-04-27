@@ -342,6 +342,7 @@ export default function Dashboard() {
             />
             <GuidedTour />
         </AppShell>
+        </ProtectedRoute>
     );
 }
 
