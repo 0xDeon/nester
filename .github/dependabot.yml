@@ -4,29 +4,76 @@ updates:
     directory: "/packages/contracts"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+      day: "monday"
+      time: "09:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
     labels: ["dependencies", "smart-contracts"]
+    groups:
+      cargo-deps:
+        patterns: ["*"]
 
   - package-ecosystem: "gomod"
     directory: "/apps/api"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
     labels: ["dependencies", "backend"]
+    groups:
+      go-deps:
+        patterns: ["*"]
 
   - package-ecosystem: "pip"
     directory: "/apps/intelligence"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
     labels: ["dependencies", "AI"]
+    groups:
+      python-deps:
+        patterns: ["*"]
 
   - package-ecosystem: "npm"
     directory: "/apps/dapp/frontend"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
     labels: ["dependencies", "frontend"]
+    groups:
+      npm-production:
+        dependency-type: "production"
+        patterns: ["*"]
+      npm-dev:
+        dependency-type: "development"
+        patterns: ["*"]
 
   - package-ecosystem: "npm"
     directory: "/apps/website"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
     labels: ["dependencies", "frontend"]
+    groups:
+      website-production:
+        dependency-type: "production"
+        patterns: ["*"]
+      website-dev:
+        dependency-type: "development"
+        patterns: ["*"]
