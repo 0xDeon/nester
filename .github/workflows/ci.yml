@@ -159,7 +159,7 @@ jobs:
           sudo mv gitleaks /usr/local/bin/gitleaks
 
       - name: Run gitleaks
-        run: gitleaks detect --source . --no-git --redact --no-banner
+        run: gitleaks detect --source . --no-git --redact --no-banner --config .gitleaks.toml
 
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'

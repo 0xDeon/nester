@@ -451,8 +451,10 @@ fn vault_deposit_and_withdraw_syncs_vault_token_supply() {
     assert_eq!(h.token().total_assets(), 10_000_000);
 
     // Partial withdraw burns shares in the vault-token contract.
-    let remaining = h.vault().withdraw(&user, &4_000_000, &0);
-    assert_eq!(remaining, 6_000_000);
-    assert_eq!(h.token().balance(&user), 6_000_000);
-    assert_eq!(h.token().total_supply(), 6_000_000);
+    // The default circuit breaker threshold is 20% of total_assets (= 2_000_000).
+    // Stay at or below that to avoid triggering CB_TRIG (#11).
+    let remaining = h.vault().withdraw(&user, &2_000_000, &0);
+    assert_eq!(remaining, 8_000_000);
+    assert_eq!(h.token().balance(&user), 8_000_000);
+    assert_eq!(h.token().total_supply(), 8_000_000);
 }
