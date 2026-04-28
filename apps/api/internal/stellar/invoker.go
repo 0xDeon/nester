@@ -407,7 +407,7 @@ func (c *ContractInvoker) InvokeWithI128Pair(ctx context.Context, contractAddres
 
 func int64ToI128ScVal(n int64) xdr.ScVal {
 	hi := xdr.Int64(0)
-	lo := xdr.Uint64(uint64(n))
+	lo := xdr.Uint64(uint64(n)) // #nosec G115 -- two's complement i128 encoding; hi is set to -1 for negatives
 	if n < 0 {
 		hi = xdr.Int64(-1)
 	}
