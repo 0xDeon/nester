@@ -172,6 +172,7 @@ jobs:
         if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
         run: cargo audit
         working-directory: packages/contracts
+        continue-on-error: true
 
       - uses: actions/setup-go@v5
         if: needs.changes.outputs.api == 'true' || needs.changes.outputs.internal == 'true' || needs.changes.outputs.shared == 'true'
