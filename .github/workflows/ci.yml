@@ -203,12 +203,14 @@ jobs:
         with:
           node-version: 22
 
-      - uses: pnpm/action-setup@v4
+      - name: Install dapp dependencies for audit
         if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
+        run: npm install
+        working-directory: apps/dapp/frontend
 
       - name: Audit JavaScript dependencies
         if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
-        run: pnpm audit --audit-level=high
+        run: npm audit --audit-level=high
         working-directory: apps/dapp/frontend
 
       - uses: actions/setup-python@v5
