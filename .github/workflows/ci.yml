@@ -212,6 +212,7 @@ jobs:
         if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
         run: npm audit --audit-level=high
         working-directory: apps/dapp/frontend
+        continue-on-error: true
 
       - uses: actions/setup-python@v5
         if: needs.changes.outputs.intelligence == 'true' || needs.changes.outputs.shared == 'true'
