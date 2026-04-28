@@ -21,6 +21,7 @@ import (
 	"github.com/suncrestlabs/nester/apps/api/internal/repository"
 	"github.com/suncrestlabs/nester/apps/api/internal/repository/postgres"
 	"github.com/suncrestlabs/nester/apps/api/internal/service"
+	performancesvc "github.com/suncrestlabs/nester/apps/api/internal/service/performance"
 	"github.com/suncrestlabs/nester/apps/api/internal/ws"
 	logpkg "github.com/suncrestlabs/nester/apps/api/pkg/logger"
 )
@@ -119,6 +120,24 @@ func run() error {
 	defer wsCancel()
 	go wsHub.Run(wsCtx)
 
+	performanceRepository := postgres.NewPerformanceRepository(db)
+	performanceService := performancesvc.NewService(performanceRepository)
+	performanceHandler := handler.NewPerformanceHandler(performanceService)
+
+	tracker := performancesvc.NewTracker(
+		performanceRepository,
+		vaultRepository,
+		nil, // BalanceProvider: wire to a Stellar adapter once the on-chain reader is exposed.
+		cfg.Performance().SnapshotInterval(),
+	)
+	trackerCtx, cancelTracker := context.WithCancel(context.Background())
+	defer cancelTracker()
+	go func() {
+		if err := tracker.Run(trackerCtx); err != nil && !errors.Is(err, context.Canceled) {
+			baseLogger.Error("performance tracker stopped", "error", err.Error())
+		}
+	}()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler(pgPool, cfg.Database().ConnectionTimeout()))
 	mux.HandleFunc("GET /healthz", healthHandler(pgPool, cfg.Database().ConnectionTimeout()))
@@ -129,7 +148,8 @@ func run() error {
 	adminHandler.Register(mux)
 	authHandler.Register(mux)
 	rateHandler.Register(mux)
-	
+	performanceHandler.Register(mux)
+
 	mux.HandleFunc("GET /ws", wsHub.ServeWs)
 
 	authRules := []middleware.RouteRule{
