@@ -43,6 +43,9 @@ pnpm-debug.log*
 # Compiled binaries and executables
 *.exe
 bin/
+services/api/bin/
+services/api/server
+services/api/server.exe
 
 # Vercel
 .vercel
