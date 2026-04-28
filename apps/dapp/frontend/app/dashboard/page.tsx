@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useWallet } from "@/components/wallet-provider";
 import { useMemo, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { motion } from "framer-motion";
@@ -22,12 +21,13 @@ import {
     type PortfolioPosition,
 } from "@/components/portfolio-provider";
 import { WithdrawModal } from "@/components/vault-action-modals";
-import { PrometheusPanel } from "@/components/prometheus-panel";
 import { cn } from "@/lib/utils";
 import { GuidedTour } from "@/components/onboarding/GuidedTour";
 import { useTokenPrices } from "@/hooks/useTokenPrices";
 import { useNetwork } from "@/hooks/useNetwork";
 import { AppShell } from "@/components/app-shell";
+import { PrometheusInsightsCard } from "@/components/ai/prometheusInsightsCard";
+import { MarketSentimentWidget } from "@/components/ai/marketSentiment";
 
 const CHART_PERIODS = ["1D", "1W", "1M", "6M", "1Y", "All"] as const;
 
@@ -100,6 +100,16 @@ export default function Dashboard() {
                         Save
                     </Link>
                 </div>
+            </motion.div>
+
+            <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.08 }}
+                className="mb-8 grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] gap-4"
+            >
+                <PrometheusInsightsCard />
+                <MarketSentimentWidget />
             </motion.div>
 
             {/* ── Balance + Chart row ── */}
@@ -333,15 +343,14 @@ export default function Dashboard() {
                     </div>
                 </motion.div>
             )}
-
-            <PrometheusPanel />
             <WithdrawModal
                 open={!!selectedPosition}
                 onClose={() => setSelectedPosition(null)}
                 position={selectedPosition}
             />
             <GuidedTour />
-        </AppShell>
+            </AppShell>
+        </ProtectedRoute>
     );
 }
 
@@ -416,7 +425,5 @@ function WalletBalanceTable({
             </tbody>
         </table>
         </div>
-        </AppShell>
-        </ProtectedRoute>
     );
 }
