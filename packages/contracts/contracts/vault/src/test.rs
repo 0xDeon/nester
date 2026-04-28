@@ -103,6 +103,17 @@ fn setup() -> (
         &7u32,
     );
 
+    // Unit tests should not be blocked by the circuit breaker — tests that
+    // specifically exercise CB behaviour set their own config. Set threshold
+    // to 100 % so any single withdrawal is allowed.
+    vault.set_circuit_breaker_config(
+        &admin,
+        &CircuitBreakerConfig {
+            threshold_bps: 10000,
+            window_seconds: 7200,
+        },
+    );
+
     (env, admin, sac, vault, treasury)
 }
 
