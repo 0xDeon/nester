@@ -10,8 +10,7 @@ use soroban_sdk::{
 use nester_access_control::Role;
 use vault_token::{VaultTokenContract, VaultTokenContractClient};
 
-use crate::{CircuitBreakerConfig, VaultContract, VaultContractClient, VaultStatus};
-use crate::{FeeConfig, VaultContract, VaultContractClient, VaultStatus};
+use crate::{CircuitBreakerConfig, FeeConfig, VaultContract, VaultContractClient, VaultStatus};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -559,11 +558,11 @@ fn circuit_breaker_uses_rolling_window_across_boundary() {
         },
     );
 
-    vault.deposit(&user, &deposit_amount);
-    vault.withdraw(&user, &(100 * XLM));
+    vault.deposit(&user, &deposit_amount, &0);
+    vault.withdraw(&user, &(100 * XLM), &0);
 
     advance_time(&env, 60);
-    vault.withdraw(&user, &(100 * XLM));
+    vault.withdraw(&user, &(100 * XLM), &0);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { motion, AnimatePresence } from "framer-motion";
 import {
