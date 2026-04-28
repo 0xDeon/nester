@@ -1371,7 +1371,7 @@ impl VaultContract {
                 total_assets,
                 config.management_fee_bps,
                 elapsed,
-            );
+            ).unwrap_or(0);
         }
         fees
     }
@@ -1415,7 +1415,7 @@ impl VaultContract {
             preview.performance_fee_deducted = nester_common::fees::calculate_performance_fee(
                 yield_part,
                 config.performance_fee_bps,
-            );
+            ).unwrap_or(0);
         }
 
         let deposit_time: u64 = env
@@ -1432,7 +1432,7 @@ impl VaultContract {
             preview.early_withdrawal_fee_deducted = nester_common::fees::calculate_withdrawal_fee(
                 assets_to_withdraw,
                 config.early_withdrawal_fee_bps,
-            );
+            ).unwrap_or(0);
         }
 
         preview.net_amount_received = assets_to_withdraw - preview.performance_fee_deducted - preview.early_withdrawal_fee_deducted;

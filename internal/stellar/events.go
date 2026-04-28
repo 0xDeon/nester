@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 )
 
