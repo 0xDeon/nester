@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/packages/contracts"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels: ["dependencies", "smart-contracts"]
+
+  - package-ecosystem: "gomod"
+    directory: "/apps/api"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "backend"]
+
+  - package-ecosystem: "pip"
+    directory: "/apps/intelligence"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "AI"]
+
+  - package-ecosystem: "npm"
+    directory: "/apps/dapp/frontend"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "frontend"]
+
+  - package-ecosystem: "npm"
+    directory: "/apps/website"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "frontend"]

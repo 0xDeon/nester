@@ -18,10 +18,17 @@ type Config struct {
 	server                ServerConfig
 	database              DatabaseConfig
 	stellar               StellarConfig
+	redis                 RedisConfig
 	settlementProviderURL string
 	auth                  AuthConfig
 	rateLimit             RateLimitConfig
 	log                   LogConfig
+	allowedOrigins        []string
+	performance           PerformanceConfig
+}
+
+type PerformanceConfig struct {
+	snapshotInterval time.Duration
 }
 
 type ServerConfig struct {
@@ -42,6 +49,7 @@ type StellarConfig struct {
 	networkPassphrase string
 	rpcURL            string
 	horizonURL        string
+	operatorSecret    string
 }
 
 type AuthConfig struct {
@@ -55,11 +63,17 @@ type RateLimitConfig struct {
 	globalWindow time.Duration
 	writeLimit   int
 	writeWindow  time.Duration
+	walletLimit  int
+	walletWindow time.Duration
 }
 
 type LogConfig struct {
 	level  string
 	format string
+}
+
+type RedisConfig struct {
+	addr string
 }
 
 func Load() (*Config, error) {
@@ -96,6 +110,10 @@ func Load() (*Config, error) {
 			networkPassphrase: loader.requiredString("STELLAR_NETWORK_PASSPHRASE"),
 			rpcURL:            loader.requiredURL("STELLAR_RPC_URL"),
 			horizonURL:        loader.requiredURL("STELLAR_HORIZON_URL"),
+			operatorSecret:    loader.stringDefault("STELLAR_OPERATOR_SECRET", ""),
+		},
+		redis: RedisConfig{
+			addr: loader.stringDefault("REDIS_ADDR", ""),
 		},
 		settlementProviderURL: loader.stringDefault("SETTLEMENT_PROVIDER_URL", ""),
 		auth: AuthConfig{
@@ -108,10 +126,16 @@ func Load() (*Config, error) {
 			globalWindow: loader.durationDefault("RATELIMIT_GLOBAL_WINDOW", 1*time.Minute),
 			writeLimit:   loader.intDefault("RATELIMIT_WRITE_LIMIT", 20),
 			writeWindow:  loader.durationDefault("RATELIMIT_WRITE_WINDOW", 1*time.Minute),
+			walletLimit:  loader.intDefault("RATELIMIT_WALLET_LIMIT", 60),
+			walletWindow: loader.durationDefault("RATELIMIT_WALLET_WINDOW", 1*time.Minute),
 		},
 		log: LogConfig{
 			level:  strings.ToLower(loader.stringDefault("LOG_LEVEL", "info")),
 			format: strings.ToLower(loader.stringDefault("LOG_FORMAT", defaultLogFormat(environment))),
+		},
+		allowedOrigins: loader.stringSliceDefault("ALLOWED_ORIGINS", nil),
+		performance: PerformanceConfig{
+			snapshotInterval: loader.durationDefault("PERFORMANCE_SNAPSHOT_INTERVAL", 1*time.Hour),
 		},
 	}
 
@@ -154,6 +178,30 @@ func (c Config) RateLimit() RateLimitConfig {
 
 func (c Config) Log() LogConfig {
 	return c.log
+}
+
+func (c Config) Redis() RedisConfig {
+	return c.redis
+}
+
+func (c Config) Performance() PerformanceConfig {
+	return c.performance
+}
+
+func (p PerformanceConfig) SnapshotInterval() time.Duration {
+	return p.snapshotInterval
+}
+
+// AllowedOrigins returns the list of origins permitted to make cross-origin
+// requests to the API. An empty slice disables cross-origin access.
+func (c Config) AllowedOrigins() []string {
+	out := make([]string, len(c.allowedOrigins))
+	copy(out, c.allowedOrigins)
+	return out
+}
+
+func (r RedisConfig) Addr() string {
+	return r.addr
 }
 
 func (c *Config) validate(loader *envLoader) {
@@ -213,12 +261,47 @@ func (c *Config) validate(loader *envLoader) {
 		loader.addError("RATELIMIT_WRITE_WINDOW must be greater than 0")
 	}
 
+	if c.rateLimit.walletLimit <= 0 {
+		loader.addError("RATELIMIT_WALLET_LIMIT must be greater than 0")
+	}
+
+	if c.rateLimit.walletWindow <= 0 {
+		loader.addError("RATELIMIT_WALLET_WINDOW must be greater than 0")
+	}
+
 	if !isOneOf(c.log.level, "debug", "info", "warn", "error") {
 		loader.addError("LOG_LEVEL must be one of debug, info, warn, error")
 	}
 
 	if !isOneOf(c.log.format, "json", "text") {
 		loader.addError("LOG_FORMAT must be one of json, text")
+	}
+
+	validateAllowedOrigins(c.environment, c.allowedOrigins, loader)
+
+	if c.performance.snapshotInterval <= 0 {
+		loader.addError("PERFORMANCE_SNAPSHOT_INTERVAL must be greater than 0")
+	}
+}
+
+func validateAllowedOrigins(environment string, origins []string, loader *envLoader) {
+	if (environment == "production" || environment == "staging") && len(origins) == 0 {
+		loader.addError("ALLOWED_ORIGINS must list at least one origin in production or staging")
+	}
+
+	for _, origin := range origins {
+		if origin == "*" {
+			loader.addError("ALLOWED_ORIGINS must not contain wildcard \"*\"; list explicit origins instead")
+			continue
+		}
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			loader.addError(fmt.Sprintf("ALLOWED_ORIGINS entry %q is not a valid origin (expected scheme://host[:port])", origin))
+			continue
+		}
+		if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			loader.addError(fmt.Sprintf("ALLOWED_ORIGINS entry %q must not contain a path, query, or fragment", origin))
+		}
 	}
 }
 
@@ -270,6 +353,10 @@ func (s StellarConfig) HorizonURL() string {
 	return s.horizonURL
 }
 
+func (s StellarConfig) OperatorSecret() string {
+	return s.operatorSecret
+}
+
 func (l LogConfig) Level() string {
 	return l.level
 }
@@ -304,6 +391,14 @@ func (r RateLimitConfig) WriteLimit() int {
 
 func (r RateLimitConfig) WriteWindow() time.Duration {
 	return r.writeWindow
+}
+
+func (r RateLimitConfig) WalletLimit() int {
+	return r.walletLimit
+}
+
+func (r RateLimitConfig) WalletWindow() time.Duration {
+	return r.walletWindow
 }
 
 type envLoader struct {
@@ -351,6 +446,21 @@ func (l *envLoader) intDefault(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func (l *envLoader) stringSliceDefault(key string, fallback []string) []string {
+	raw, ok := l.lookup(key)
+	if !ok {
+		return fallback
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func (l *envLoader) durationDefault(key string, fallback time.Duration) time.Duration {

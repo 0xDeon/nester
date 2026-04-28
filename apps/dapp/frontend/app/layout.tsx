@@ -28,6 +28,10 @@ import { OnboardingProvider } from "@/hooks/useOnboarding";
 import { NetworkProvider } from "@/context/NetworkProvider";
 import { NetworkBanner } from "@/components/network/NetworkSelector";
 import { PrometheusChatbot } from "@/components/ai/prometheusChatbot";
+import { ReactQueryProvider } from "@/components/react-query-provider";
+import { AuthProvider } from "@/components/auth-provider";
+import { BottomNav } from "@/components/bottom-nav";
+import { MotionConfig } from "framer-motion";
 
 export default function RootLayout({
     children,
@@ -38,26 +42,38 @@ export default function RootLayout({
         <html lang="en" suppressHydrationWarning>
             <body
                 suppressHydrationWarning
-                className={`${inter.className} ${inter.variable} antialiased`}
+                className={`${inter.className} ${inter.variable} antialiased md:pb-0 mobile-content-pad`}
             >
-                <NetworkProvider>
-                    <SettingsProvider>
-                        <WalletProvider>
-                            <NotificationsProvider>
-                                <NetworkBanner />
-                                <PortfolioProvider>
-                                    <WebSocketProvider>
-                                        <OnboardingProvider>
-                                            {children}
-                                            <NotificationsToaster />
-                                            <PrometheusChatbot />
-                                        </OnboardingProvider>
-                                    </WebSocketProvider>
-                                </PortfolioProvider>
-                            </NotificationsProvider>
-                        </WalletProvider>
-                    </SettingsProvider>
-                </NetworkProvider>
+                <MotionConfig reducedMotion="user">
+                    <ReactQueryProvider>
+                        <NetworkProvider>
+                            <SettingsProvider>
+                                <WalletProvider>
+                                    <AuthProvider>
+                                        <NotificationsProvider>
+                                            <NetworkBanner />
+                                            <PortfolioProvider>
+                                                <WebSocketProvider>
+                                                    <OnboardingProvider>
+                                                        <a href="#main-content" className="skip-link">
+                                                            Skip to main content
+                                                        </a>
+                                                        <main id="main-content">
+                                                            {children}
+                                                        </main>
+                                                        <BottomNav />
+                                                        <NotificationsToaster />
+                                                        <PrometheusChatbot />
+                                                    </OnboardingProvider>
+                                                </WebSocketProvider>
+                                            </PortfolioProvider>
+                                        </NotificationsProvider>
+                                    </AuthProvider>
+                                </WalletProvider>
+                            </SettingsProvider>
+                        </NetworkProvider>
+                    </ReactQueryProvider>
+                </MotionConfig>
             </body>
         </html>
     );

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { ProtectedRoute } from "@/components/protected-route";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Unlock,
@@ -47,6 +47,7 @@ interface SavingsVault {
     badge: string;
     features: string[];
     supportedAssets: ("USDC" | "XLM")[];
+    contractAddress: string;
 }
 
 // ── Vault Definitions ─────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ const SAVINGS_VAULTS: SavingsVault[] = [
         badge: "No lockup",
         features: ["Withdraw anytime", "No exit fee", "Daily yield accrual"],
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: "CINVALIDCONTRACTADDRESS00000000000000000000000000000000000",
     },
     {
         id: "auto-compound",
@@ -85,6 +87,7 @@ const SAVINGS_VAULTS: SavingsVault[] = [
         badge: "Auto-reinvest",
         features: ["Daily auto-compounding", "No manual claiming", "No exit fee"],
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: "CINVALIDCONTRACTADDRESS00000000000000000000000000000000000",
     },
     {
         id: "stablecoin-yield",
@@ -102,6 +105,7 @@ const SAVINGS_VAULTS: SavingsVault[] = [
         badge: "Multi-pool",
         features: ["Multi-stablecoin exposure", "Weekly rebalance", "No exit fee"],
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: "CINVALIDCONTRACTADDRESS00000000000000000000000000000000000",
     },
     {
         id: "custom-savings",
@@ -119,6 +123,7 @@ const SAVINGS_VAULTS: SavingsVault[] = [
         badge: "Goal-based",
         features: ["Named savings goal", "Target amount tracking", "Withdraw anytime"],
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: "CINVALIDCONTRACTADDRESS00000000000000000000000000000000000",
     },
 ];
 
@@ -519,6 +524,7 @@ function DepositModal({
                                         const receipt = await executeVaultDeposit({
                                             walletAddress: address,
                                             vaultId: vault.id,
+                                            contractId: vault.contractAddress,
                                             asset: selectedAsset,
                                             amount: parsedAmount,
                                         });
@@ -616,18 +622,10 @@ const FILTERS: { label: string; value: SavingsVaultType | "all" }[] = [
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SavingsPage() {
-    const { isConnected } = useWallet();
     const { positions } = usePortfolio();
-    const router = useRouter();
     const [filter, setFilter] = useState<SavingsVaultType | "all">("all");
     const [selectedVault, setSelectedVault] = useState<SavingsVault | null>(null);
     const [showHowItWorks, setShowHowItWorks] = useState(false);
-
-    useEffect(() => {
-        if (!isConnected) router.push("/");
-    }, [isConnected, router]);
-
-    if (!isConnected) return null;
 
     const filtered =
         filter === "all"
@@ -635,7 +633,8 @@ export default function SavingsPage() {
             : SAVINGS_VAULTS.filter((v) => v.type === filter);
 
     return (
-        <AppShell>
+        <ProtectedRoute>
+            <AppShell>
 
                 {/* ── Page header ──────────────────────────────────────────── */}
                 <motion.div
@@ -761,5 +760,6 @@ export default function SavingsPage() {
 
             <DepositModal vault={selectedVault} onClose={() => setSelectedVault(null)} />
         </AppShell>
+        </ProtectedRoute>
     );
 }

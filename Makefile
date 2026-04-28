@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check clippy build test integration-test clean dev dev-down dev-reset dev-logs dev-db
+.PHONY: fmt fmt-check clippy build test test-short integration-test clean dev dev-down dev-reset dev-logs dev-db go-test go-test-short
 
 CARGO := cargo
 CONTRACTS_DIR := packages/contracts
@@ -21,6 +21,12 @@ test:
 
 integration-test:
 	cd $(CONTRACTS_DIR) && $(CARGO) test --all --lib
+
+go-test:
+	cd apps/api && go test -race -timeout 120s ./...
+
+go-test-short:
+	cd apps/api && go test -race -short -timeout 60s ./...
 
 clean:
 	cd $(CONTRACTS_DIR) && $(CARGO) clean

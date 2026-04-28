@@ -286,7 +286,7 @@ export default function OfframpPage() {
                     className="rounded-2xl border border-border bg-white shadow-sm overflow-hidden"
                 >
                     <div className="p-4 sm:p-5">
-                        <label className="text-xs text-muted-foreground font-medium mb-2 block">
+                        <label htmlFor="amount" className="text-xs text-muted-foreground font-medium mb-2 block">
                             You&apos;ll send
                         </label>
                         <div className="flex flex-col gap-1">
@@ -299,10 +299,14 @@ export default function OfframpPage() {
                                     control={control}
                                     render={({ field: { onChange, onBlur, value } }) => (
                                         <input
+                                            id="amount"
                                             type="text"
                                             inputMode="decimal"
                                             placeholder="0.00"
                                             value={value}
+                                            aria-describedby={errors.amount ? "amount-error" : undefined}
+                                            aria-invalid={!!errors.amount}
+                                            aria-required="true"
                                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                                                 const val = e.target.value;
                                                 if (/^\d*\.?\d*$/.test(val)) {
@@ -323,8 +327,11 @@ export default function OfframpPage() {
                                 />
                                 <div className="relative">
                                     <button
+                                        aria-haspopup="listbox"
+                                        aria-expanded={showSendDropdown}
+                                        aria-controls="send-asset-dropdown"
                                         onClick={() => setShowSendDropdown(!showSendDropdown)}
-                                        className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px]"
+                                        className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                     >
                                     <Image
                                         src={sendAsset.image}
@@ -339,15 +346,32 @@ export default function OfframpPage() {
                                     <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                                 </button>
                                 {showSendDropdown && (
-                                    <div className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-white shadow-lg py-1 z-10">
+                                    <div
+                                        id="send-asset-dropdown"
+                                        role="listbox"
+                                        className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-white shadow-lg py-1 z-10"
+                                    >
                                         {SEND_ASSETS.map((asset) => (
                                             <button
                                                 key={asset.symbol}
+                                                role="option"
+                                                aria-selected={sendAsset.symbol === asset.symbol}
+                                                tabIndex={0}
                                                 onClick={() => {
                                                     setSendAsset(asset);
                                                     setShowSendDropdown(false);
                                                 }}
-                                                className="w-full flex items-center gap-2.5 px-3 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[44px]"
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        setSendAsset(asset);
+                                                        setShowSendDropdown(false);
+                                                    } else if (e.key === 'Escape') {
+                                                        e.preventDefault();
+                                                        setShowSendDropdown(false);
+                                                    }
+                                                }}
+                                                className="w-full flex items-center gap-2.5 px-3 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                             >
                                                 <Image
                                                     src={asset.image}
@@ -368,7 +392,7 @@ export default function OfframpPage() {
                         </div>
                         <div className="flex justify-between mt-2 px-1">
                             {errors.amount ? (
-                                <span className="text-xs text-red-500 font-medium">{errors.amount.message}</span>
+                                <span id="amount-error" className="text-xs text-red-500 font-medium">{errors.amount.message}</span>
                             ) : (
                                 <span></span>
                             )}
@@ -414,8 +438,11 @@ export default function OfframpPage() {
                             </div>
                             <div className="relative">
                                 <button
+                                    aria-haspopup="listbox"
+                                    aria-expanded={showReceiveDropdown}
+                                    aria-controls="receive-currency-dropdown"
                                     onClick={() => setShowReceiveDropdown(!showReceiveDropdown)}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px]"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                 >
                                     <Image
                                         src={receiveCurrency.image}
@@ -430,15 +457,32 @@ export default function OfframpPage() {
                                     <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                                 </button>
                                 {showReceiveDropdown && (
-                                    <div className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-white shadow-lg py-1 z-10">
+                                    <div
+                                        id="receive-currency-dropdown"
+                                        role="listbox"
+                                        className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-white shadow-lg py-1 z-10"
+                                    >
                                         {RECEIVE_CURRENCIES.map((currency) => (
                                             <button
                                                 key={currency.symbol}
+                                                role="option"
+                                                aria-selected={receiveCurrency.symbol === currency.symbol}
+                                                tabIndex={0}
                                                 onClick={() => {
                                                     setReceiveCurrency(currency);
                                                     setShowReceiveDropdown(false);
                                                 }}
-                                                className="w-full flex items-center gap-2.5 px-3 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[44px]"
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        setReceiveCurrency(currency);
+                                                        setShowReceiveDropdown(false);
+                                                    } else if (e.key === 'Escape') {
+                                                        e.preventDefault();
+                                                        setShowReceiveDropdown(false);
+                                                    }
+                                                }}
+                                                className="w-full flex items-center gap-2.5 px-3 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                             >
                                                 <Image
                                                     src={currency.image}
@@ -462,7 +506,7 @@ export default function OfframpPage() {
                     {/* Bank Details Section */}
                     <div className="border-t border-border p-4 sm:p-5 space-y-4">
                         <div className="relative">
-                            <label className="text-xs text-muted-foreground font-medium mb-2 block">
+                            <label htmlFor="bankCode" className="text-xs text-muted-foreground font-medium mb-2 block">
                                 Select bank
                             </label>
                             <Controller
@@ -473,9 +517,16 @@ export default function OfframpPage() {
                                     return (
                                         <>
                                             <button
+                                                id="bankCode"
+                                                type="button"
+                                                aria-haspopup="listbox"
+                                                aria-expanded={showBankDropdown}
+                                                aria-controls="bank-dropdown"
+                                                aria-invalid={!!errors.bankCode}
+                                                aria-describedby={errors.bankCode ? "bank-error" : undefined}
                                                 onClick={() => setShowBankDropdown(!showBankDropdown)}
                                                 className={cn(
-                                                    "w-full flex items-center justify-between px-4 py-3 rounded-xl border border-border hover:border-foreground/20 transition-colors bg-white min-h-[52px]",
+                                                    "w-full flex items-center justify-between px-4 py-3 rounded-xl border border-border hover:border-foreground/20 transition-colors bg-white min-h-[52px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                                                     errors.bankCode && "border-red-500 focus:border-red-500"
                                                 )}
                                             >
@@ -491,16 +542,35 @@ export default function OfframpPage() {
                                                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
                                             </button>
                                             {showBankDropdown && (
-                                                <div className="absolute left-0 right-0 top-full mt-1 rounded-xl border border-border bg-white shadow-lg py-1 z-20 max-h-56 overflow-y-auto">
+                                                <div
+                                                    id="bank-dropdown"
+                                                    role="listbox"
+                                                    className="absolute left-0 right-0 top-full mt-1 rounded-xl border border-border bg-white shadow-lg py-1 z-20 max-h-56 overflow-y-auto"
+                                                >
                                                     {BANKS.map((bank) => (
                                                         <button
                                                             key={bank.code}
+                                                            type="button"
+                                                            role="option"
+                                                            aria-selected={value === bank.code}
+                                                            tabIndex={0}
                                                             onClick={() => {
                                                                 onChange(bank.code);
                                                                 setShowBankDropdown(false);
                                                                 trigger("bankCode");
                                                             }}
-                                                            className="w-full text-left px-4 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[48px]"
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                                    e.preventDefault();
+                                                                    onChange(bank.code);
+                                                                    setShowBankDropdown(false);
+                                                                    trigger("bankCode");
+                                                                } else if (e.key === 'Escape') {
+                                                                    e.preventDefault();
+                                                                    setShowBankDropdown(false);
+                                                                }
+                                                            }}
+                                                            className="w-full text-left px-4 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                                         >
                                                             {bank.name}
                                                         </button>
@@ -508,7 +578,7 @@ export default function OfframpPage() {
                                                 </div>
                                             )}
                                             {errors.bankCode && (
-                                                <span className="text-xs text-red-500 font-medium mt-1 block">
+                                                <span id="bank-error" className="text-xs text-red-500 font-medium mt-1 block">
                                                     {errors.bankCode.message}
                                                 </span>
                                             )}
@@ -519,7 +589,7 @@ export default function OfframpPage() {
                         </div>
 
                         <div>
-                            <label className="text-xs text-muted-foreground font-medium mb-2 block">
+                            <label htmlFor="accountNumber" className="text-xs text-muted-foreground font-medium mb-2 block">
                                 Account number
                             </label>
                             <Controller
@@ -528,11 +598,15 @@ export default function OfframpPage() {
                                 render={({ field: { onChange, onBlur, value } }) => (
                                     <>
                                         <input
+                                            id="accountNumber"
                                             type="text"
                                             inputMode="numeric"
                                             maxLength={10}
                                             placeholder="Enter 10-digit account number"
                                             value={value}
+                                            aria-invalid={!!errors.accountNumber}
+                                            aria-describedby={errors.accountNumber ? "account-error" : undefined}
+                                            aria-required="true"
                                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                                                 const val = e.target.value.replace(/\D/g, "");
                                                 onChange(val);
@@ -548,7 +622,7 @@ export default function OfframpPage() {
                                             )}
                                         />
                                         {errors.accountNumber && (
-                                            <span className="text-xs text-red-500 font-medium mt-1 block">
+                                            <span id="account-error" className="text-xs text-red-500 font-medium mt-1 block">
                                                 {errors.accountNumber.message}
                                             </span>
                                         )}

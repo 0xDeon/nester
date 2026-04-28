@@ -102,7 +102,16 @@ export class TransactionTimeoutError extends Error {
 // ── Soroban RPC client ────────────────────────────────────────────────────────
 
 function getServer(rpcUrl: string): SorobanRpc.Server {
-  return new SorobanRpc.Server(rpcUrl, { allowHttp: true });
+  const isProd = process.env.NODE_ENV === "production";
+
+  if (isProd && !rpcUrl.startsWith("https://")) {
+    throw new Error(
+      `Production Soroban RPC URL must use HTTPS. Got: ${rpcUrl}. ` +
+        `Set NEXT_PUBLIC_STELLAR_RPC_URL to a valid https:// endpoint.`
+    );
+  }
+
+  return new SorobanRpc.Server(rpcUrl, { allowHttp: !isProd });
 }
 
 // ── Transaction builders ──────────────────────────────────────────────────────
@@ -296,44 +305,23 @@ export async function submitTransaction(
   throw new TransactionTimeoutError();
 }
 
-// ── High-level vault flows (auto-fallback to mock) ───────────────────────────
+// ── High-level vault flows ───────────────────────────────────────────────────
 
 function isRealContractId(id: string): boolean {
   return /^C[A-Z0-9]{55}$/.test(id);
 }
 
-function resolveVaultContractId(asset: "USDC" | "XLM"): string {
-  return asset === "XLM" ? VAULT_XLM_CONTRACT_ID : VAULT_CONTRACT_ID;
-}
-
-async function runMockFlow(
-  walletAddress: string,
-  memo: string
-): Promise<TransactionReceipt> {
-  const { buildMockTransactionXdr, signWithWalletOrMock, simulateSubmission } =
-    await import("@/lib/mock-soroban");
-  const network = getCurrentNetwork();
-  const xdr = await buildMockTransactionXdr(
-    walletAddress,
-    memo,
-    network.networkPassphrase
-  );
-  await signWithWalletOrMock(xdr, network.networkPassphrase);
-  const submission = await simulateSubmission(network.explorerUrl);
-  return { txHash: submission.txHash, explorerUrl: submission.explorerUrl, ledger: 0 };
-}
-
 export async function executeVaultDeposit(params: {
   walletAddress: string;
   vaultId: string;
+  contractId: string;
   asset: "USDC" | "XLM";
   amount: number;
 }): Promise<TransactionReceipt> {
-  const { walletAddress, vaultId, asset, amount } = params;
-  const contractId = resolveVaultContractId(asset);
+  const { walletAddress, contractId, amount } = params;
 
   if (!isRealContractId(contractId)) {
-    return runMockFlow(walletAddress, `deposit:${vaultId}:${amount.toFixed(2)}`);
+    throw new Error("Vault is not yet live. Deposits are currently disabled.");
   }
 
   const { xdr } = await buildDepositTransaction({ walletAddress, contractId, amount });
@@ -344,14 +332,14 @@ export async function executeVaultDeposit(params: {
 export async function executeVaultWithdraw(params: {
   walletAddress: string;
   vaultId: string;
+  contractId: string;
   asset: "USDC" | "XLM";
   shares: number;
 }): Promise<TransactionReceipt> {
-  const { walletAddress, vaultId, asset, shares } = params;
-  const contractId = resolveVaultContractId(asset);
+  const { walletAddress, contractId, shares } = params;
 
   if (!isRealContractId(contractId)) {
-    return runMockFlow(walletAddress, `withdraw:${vaultId}:${shares.toFixed(2)}`);
+    throw new Error("Vault is not yet live. Withdrawals are currently disabled.");
   }
 
   const { xdr } = await buildWithdrawTransaction({ walletAddress, contractId, shares });

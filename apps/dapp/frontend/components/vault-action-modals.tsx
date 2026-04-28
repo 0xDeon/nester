@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { validateAmount } from "@/lib/validation";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import {
     AlertCircle,
     CheckCircle2,
@@ -22,14 +23,11 @@ import {
     usePortfolio,
     type PortfolioPosition,
 } from "@/components/portfolio-provider";
-import {
-    buildMockTransactionXdr,
-    signWithWalletOrMock,
-    simulateSubmission,
-} from "@/lib/mock-soroban";
+
 import { cn } from "@/lib/utils";
-import { type VaultDefinition, type SupportedAsset, vaultDefinitions } from "@/lib/vault-data";
+import { useVaults, type Vault as VaultDefinition } from "@/hooks/useVaults";
 import { useWallet } from "@/components/wallet-provider";
+import { executeVaultDeposit, executeVaultWithdraw } from "@/lib/stellar/transaction";
 
 import { useNetwork } from "@/hooks/useNetwork";
 
@@ -55,6 +53,19 @@ function ModalShell({
     subtitle: string;
     children: React.ReactNode;
 }) {
+    const modalRef = useRef<HTMLDivElement>(null);
+    useFocusTrap(modalRef, open);
+
+    // ESC to close
+    useEffect(() => {
+        if (!open) return;
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === "Escape") onClose();
+        };
+        document.addEventListener("keydown", handleEsc);
+        return () => document.removeEventListener("keydown", handleEsc);
+    }, [open, onClose]);
+
     return (
         <AnimatePresence>
             {open && (
@@ -62,22 +73,26 @@ function ModalShell({
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-[100] bg-black/45 px-4 py-8 backdrop-blur-sm"
+                    className="fixed inset-0 z-[100] bg-black/45 sm:px-4 sm:py-8 backdrop-blur-sm"
                 >
-                    <div className="flex min-h-full items-center justify-center">
+                    <div className="flex h-full sm:min-h-full items-end sm:items-center justify-center">
                         <motion.div
+                            ref={modalRef}
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="modal-title"
                             initial={{ opacity: 0, y: 24, scale: 0.98 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 12, scale: 0.98 }}
                             transition={{ duration: 0.2 }}
-                            className="w-full max-w-2xl overflow-hidden rounded-[28px] border border-white/10 bg-[#fafafa] shadow-2xl max-h-[90vh] flex flex-col"
+                            className="w-full h-full sm:h-auto sm:max-w-2xl overflow-hidden sm:rounded-[28px] border border-white/10 bg-[#fafafa] shadow-2xl sm:max-h-[90vh] flex flex-col"
                         >
                             <div className="flex items-start justify-between border-b border-border px-6 py-5">
                                 <div>
                                     <p className="text-xs font-mono uppercase tracking-[0.18em] text-muted-foreground">
                                         Vault Action
                                     </p>
-                                    <h2 className="mt-2 font-heading text-2xl font-light text-foreground">
+                                    <h2 id="modal-title" className="mt-2 font-heading text-2xl font-light text-foreground">
                                         {title}
                                     </h2>
                                     <p className="mt-1 text-sm text-muted-foreground">
@@ -86,9 +101,10 @@ function ModalShell({
                                 </div>
                                 <button
                                     onClick={onClose}
-                                    className="rounded-full border border-border bg-white p-2 text-muted-foreground transition-colors hover:text-foreground"
+                                    aria-label="Close modal"
+                                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-border bg-white text-muted-foreground transition-colors hover:text-foreground active:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                                 >
-                                    <X className="h-4 w-4" />
+                                    <X className="h-5 w-5" />
                                 </button>
                             </div>
                             <div className="overflow-y-auto flex-1">
@@ -122,12 +138,10 @@ export function DepositModal({
         walletPopupUsed: boolean;
     } | null>(null);
 
-    const [selectedAsset, setSelectedAsset] = useState<SupportedAsset>(
-        vault?.supportedAssets?.[0] ?? "USDC"
-    );
+    const [selectedAsset, setSelectedAsset] = useState<"USDC" | "XLM">("USDC");
 
     // Reset selected asset when vault changes
-    const assets = vault?.supportedAssets ?? ["USDC"];
+    const assets = ["USDC"] as ("USDC" | "XLM")[];
     const balance = getAvailableBalance(selectedAsset);
 
     const formSchema = useMemo(() => z.object({
@@ -161,7 +175,7 @@ export function DepositModal({
     const [showLargeWarning, setShowLargeWarning] = useState(false);
     
     const canSubmit = !!vault && !!address && isValid && amount > 0;
-    const estimatedYield = vault ? amount * vault.apy : 0;
+    const estimatedYield = vault && vault.apy !== undefined ? amount * (vault.apy / 100) : 0;
     const sharesReceived = amount;
 
     const reset = () => {
@@ -181,18 +195,16 @@ export function DepositModal({
         setShowLargeWarning(false);
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address,
-                `deposit:${vault.id}:${amount.toFixed(2)}`,
-                currentNetwork.networkPassphrase
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
-
-            setState("submitting");
-            const submission = await simulateSubmission(currentNetwork.explorerUrl);
+            const submission = await executeVaultDeposit({
+                walletAddress: address,
+                vaultId: vault.id,
+                contractId: vault.contractAddress,
+                asset: selectedAsset,
+                amount,
+            });
 
             recordDeposit({
-                vault: { ...vault, asset: selectedAsset },
+                vault: { ...vault, asset: selectedAsset, apy: vault.apy || 0, lockDays: 0, earlyWithdrawalPenaltyPct: 0 },
                 amount,
                 txHash: submission.txHash,
             });
@@ -200,7 +212,7 @@ export function DepositModal({
             setReceipt({
                 txHash: submission.txHash,
                 explorerUrl: submission.explorerUrl,
-                walletPopupUsed,
+                walletPopupUsed: true,
             });
             setState("success");
         } catch (err) {
@@ -242,8 +254,11 @@ export function DepositModal({
                                         {vault.name}
                                     </p>
                                     <p className="mt-2 font-heading text-3xl font-light text-emerald-600">
-                                        {vault.apyLabel}
+                                        {vault.apy !== undefined ? `${vault.apy.toFixed(1)}%` : "TBD"}
                                     </p>
+                                    {vault.apy !== undefined && (
+                                        <p className="text-[9px] text-black/40 mt-1 max-w-[200px]">APY is variable and based on recent performance. Past performance is not indicative of future results.</p>
+                                    )}
                                 </div>
                                 <div className="rounded-2xl bg-secondary px-3 py-2 text-right">
                                     <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -302,7 +317,7 @@ export function DepositModal({
                                                                         setShowLargeWarning(false);
                                                                     }}
                                                                     className={cn(
-                                                                        "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                                                                        "min-h-[var(--touch-target)] min-w-[var(--touch-target)] rounded-full px-3 text-xs font-medium transition-colors",
                                                                         selectedAsset === a
                                                                             ? "bg-foreground text-background"
                                                                             : "text-foreground/60 hover:text-foreground"
@@ -324,7 +339,7 @@ export function DepositModal({
                                                             trigger("amount");
                                                             setShowLargeWarning(false);
                                                         }}
-                                                        className="rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
+                                                        className="min-h-[var(--touch-target)] min-w-[var(--touch-target)] rounded-full border border-border bg-white px-3 text-xs font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                                     >
                                                         Max
                                                     </button>
@@ -361,19 +376,19 @@ export function DepositModal({
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Lock period</span>
                                     <span className="font-medium text-foreground">
-                                        {vault.lockDays} days
+                                        Flexible
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Management fee (annual)</span>
                                     <span className="font-medium text-foreground">
-                                        {vault.managementFeePct}%
+                                        0.5%
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Performance fee (on yield)</span>
                                     <span className="font-medium text-foreground">
-                                        {vault.performanceFeePct}%
+                                        10%
                                     </span>
                                 </div>
                                 {currentNetwork.id === 'mainnet' && (
@@ -499,7 +514,7 @@ export function DepositModal({
                             <div className="mt-5 flex gap-3">
                                 <button
                                     onClick={reset}
-                                    className="flex-1 rounded-full border border-border bg-white px-5 py-3 text-sm font-medium text-foreground transition-colors hover:border-black/15"
+                                    className="flex-1 min-h-[var(--touch-target)] rounded-full border border-border bg-white px-5 text-sm font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                 >
                                     {state === "success" ? "Close" : "Cancel"}
                                 </button>
@@ -507,7 +522,7 @@ export function DepositModal({
                                     <button
                                         onClick={handleDeposit}
                                         disabled={!canSubmit || state === "confirming" || state === "submitting"}
-                                        className="flex-1 rounded-full bg-brand-dark px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                        className="flex-1 min-h-[var(--touch-target)] rounded-full bg-brand-dark px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
                                     >
                                         {state === "confirming" && (
                                             <span className="inline-flex items-center gap-2">
@@ -607,23 +622,25 @@ export function WithdrawModal({
         onClose();
     };
 
+    const { data: vaults = [] } = useVaults();
+    const vault = vaults.find(v => v.id === position?.vaultId);
+
     const processWithdrawal = async () => {
-        if (!position || !address || !quote || !canSubmit) return;
+        if (!position || !address || !quote || !canSubmit || !vault) return;
 
         setError("");
         setState("confirming");
         setShowLargeWarning(false);
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address,
-                `withdraw:${position.vaultId}:${amount.toFixed(2)}`,
-                currentNetwork.networkPassphrase
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
+            const submission = await executeVaultWithdraw({
+                walletAddress: address,
+                vaultId: position.vaultId,
+                contractId: vault.contractAddress,
+                asset: position.asset as "USDC" | "XLM",
+                shares: amount,
+            });
 
-            setState("submitting");
-            const submission = await simulateSubmission(currentNetwork.explorerUrl);
             const result = recordWithdrawal({
                 positionId: position.id,
                 grossAmount: quote.grossAmount,
@@ -637,7 +654,7 @@ export function WithdrawModal({
             setReceipt({
                 txHash: submission.txHash,
                 explorerUrl: submission.explorerUrl,
-                walletPopupUsed,
+                walletPopupUsed: true,
                 penaltyAmount: result.penaltyAmount,
                 netAmount: result.netAmount,
             });
@@ -741,7 +758,7 @@ export function WithdrawModal({
                                             )}
                                         />
                                         <div className="flex items-center gap-2">
-                                            <span className="rounded-full bg-secondary px-3 py-2 text-sm font-medium text-foreground">
+                                            <span className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full bg-secondary px-3 text-sm font-medium text-foreground">
                                                 {position.asset ?? "USDC"}
                                             </span>
                                             <button
@@ -750,7 +767,7 @@ export function WithdrawModal({
                                                     trigger("amount");
                                                     setShowLargeWarning(false);
                                                 }}
-                                                className="rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-black/15"
+                                                className="min-h-[var(--touch-target)] min-w-[var(--touch-target)] rounded-full border border-border bg-white px-3 text-xs font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                             >
                                                 Max
                                             </button>
@@ -830,7 +847,7 @@ export function WithdrawModal({
                     <div className="flex gap-3 pt-2">
                         <button
                             onClick={reset}
-                            className="flex-1 rounded-full border border-border bg-white px-5 py-3 text-sm font-medium text-foreground transition-colors hover:border-black/15"
+                            className="flex-1 min-h-[var(--touch-target)] rounded-full border border-border bg-white px-5 text-sm font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                         >
                             {state === "success" ? "Close" : "Cancel"}
                         </button>
@@ -838,7 +855,7 @@ export function WithdrawModal({
                             <button
                                 onClick={handleWithdraw}
                                 disabled={!canSubmit || state === "confirming" || state === "submitting"}
-                                className="flex-1 rounded-full bg-[#0a0a0a] px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                className="flex-1 min-h-[var(--touch-target)] rounded-full bg-[#0a0a0a] px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
                             >
                                 {state === "confirming" && (
                                     <span className="inline-flex items-center gap-2">
@@ -889,9 +906,10 @@ export function TransferModal({
         walletPopupUsed: boolean;
     } | null>(null);
 
+    const { data: vaults = [] } = useVaults();
     const destinationVaults = useMemo(
-        () => vaultDefinitions.filter((v) => v.id !== position?.vaultId),
-        [position?.vaultId]
+        () => vaults.filter((v) => v.id !== position?.vaultId),
+        [position?.vaultId, vaults]
     );
 
     const selectedVault = destinationVaults.find((v) => v.id === selectedVaultId) ?? null;
@@ -948,36 +966,7 @@ export function TransferModal({
         setState("confirming");
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address ?? "",
-                `transfer:${position.vaultId}:${selectedVault.id}:${amt.toFixed(2)}`,
-                currentNetwork.networkPassphrase,
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
-            setState("submitting");
-            const { txHash, explorerUrl } = await simulateSubmission(currentNetwork.explorerUrl);
-
-            recordTransfer({
-                fromPositionId: position.id,
-                toVault: {
-                    id: selectedVault.id,
-                    name: selectedVault.name,
-                    asset: selectedVault.asset,
-                    apy: selectedVault.apy,
-                    lockDays: selectedVault.lockDays,
-                    earlyWithdrawalPenaltyPct: selectedVault.earlyWithdrawalPenaltyPct,
-                },
-                amount: amt,
-                txHash,
-            });
-
-            setReceipt({
-                amount: amt,
-                toVaultName: selectedVault.name,
-                explorerUrl,
-                walletPopupUsed,
-            });
-            setState("success");
+            throw new Error("Transfers are not yet live. Transfers are currently disabled.");
         } catch (err) {
             setState("error");
             setError(err instanceof Error ? err.message : "Transfer failed. Please try again.");
@@ -1038,7 +1027,7 @@ export function TransferModal({
                                                 <div>
                                                     <p className="text-sm font-medium text-foreground">{vault.name}</p>
                                                     <p className="text-xs text-muted-foreground">
-                                                        {vault.apyLabel} APY · {vault.risk} risk
+                                                        {vault.apy !== undefined ? `${vault.apy.toFixed(1)}% APY` : "APY TBD"} · {vault.strategy}
                                                     </p>
                                                 </div>
                                                 {selectedVaultId === vault.id && (
@@ -1122,7 +1111,7 @@ export function TransferModal({
                                     {selectedVault && (
                                         <div className="flex items-center justify-between text-sm">
                                             <span className="text-muted-foreground">Destination APY</span>
-                                            <span className="font-medium text-emerald-600">{selectedVault.apyLabel}</span>
+                                            <span className="font-medium text-emerald-600">{selectedVault.apy !== undefined ? `${selectedVault.apy.toFixed(1)}%` : "TBD"}</span>
                                         </div>
                                     )}
                                     {currentNetwork.id === "mainnet" && (
@@ -1179,7 +1168,7 @@ export function TransferModal({
                                 <button
                                     type="button"
                                     onClick={reset}
-                                    className="flex-1 rounded-full border border-border bg-white px-5 py-3 text-sm font-medium text-foreground transition-colors hover:border-black/15"
+                                    className="flex-1 min-h-[var(--touch-target)] rounded-full border border-border bg-white px-5 text-sm font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                 >
                                     {state === "success" ? "Close" : "Cancel"}
                                 </button>
@@ -1187,7 +1176,7 @@ export function TransferModal({
                                     <button
                                         onClick={handleTransfer}
                                         disabled={!canSubmit || state === "confirming" || state === "submitting"}
-                                        className="flex-1 rounded-full bg-brand-dark px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                                        className="flex-1 min-h-[var(--touch-target)] rounded-full bg-brand-dark px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
                                     >
                                         {state === "confirming" && (
                                             <span className="inline-flex items-center gap-2">

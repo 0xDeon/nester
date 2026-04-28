@@ -48,6 +48,15 @@ export function RecentActivity({ transactions }: RecentActivityProps) {
             ) : (
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse min-w-[600px]">
+                        <caption className="sr-only">Recent Transaction Activity</caption>
+                        <thead className="sr-only">
+                            <tr>
+                                <th scope="col">Type</th>
+                                <th scope="col" aria-sort="descending">Date</th>
+                                <th scope="col">Amount</th>
+                                <th scope="col">Transaction Hash</th>
+                            </tr>
+                        </thead>
                         <tbody className="divide-y divide-border">
                             {latestItems.map((tx) => {
                                 const Icon = TYPE_ICONS[tx.type];

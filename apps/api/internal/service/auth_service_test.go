@@ -70,7 +70,8 @@ func setupAuthService() (AuthService, *keypair.Full) {
 
 	repo := newMockRepo()
 	userService := NewUserService(repo)
-	authSvc := NewAuthService(userService, cfg)
+	store := NewInMemoryChallengeStore(cfg.ChallengeExpiry())
+	authSvc := NewAuthService(store, userService, cfg)
 
 	kp, _ := keypair.Random()
 	return authSvc, kp
@@ -130,7 +131,7 @@ func TestAuthService_VerifyAndIssue_ExpiredChallenge(t *testing.T) {
 		challengeExpiry: -1 * time.Second,
 	}
 	repo := newMockRepo()
-	svc := NewAuthService(NewUserService(repo), cfg)
+	svc := NewAuthService(NewInMemoryChallengeStore(cfg.ChallengeExpiry()), NewUserService(repo), cfg)
 
 	kp, _ := keypair.Random()
 	challenge, _ := svc.GenerateChallenge(context.Background(), kp.Address())
@@ -161,7 +162,7 @@ func TestAuthService_VerifyAndIssue_AdminRolePopulatedInToken(t *testing.T) {
 	repo.users[kp.Address()] = adminUser
 	repo.roles[adminUser.ID] = []string{"admin"}
 
-	svc := NewAuthService(NewUserService(repo), cfg)
+	svc := NewAuthService(NewInMemoryChallengeStore(cfg.ChallengeExpiry()), NewUserService(repo), cfg)
 
 	challenge, err := svc.GenerateChallenge(context.Background(), kp.Address())
 	require.NoError(t, err)
@@ -186,7 +187,7 @@ func TestAuthService_VerifyAndIssue_RegularUserHasEmptyRoles(t *testing.T) {
 	}
 	repo := newMockRepo()
 	kp, _ := keypair.Random()
-	svc := NewAuthService(NewUserService(repo), cfg)
+	svc := NewAuthService(NewInMemoryChallengeStore(cfg.ChallengeExpiry()), NewUserService(repo), cfg)
 
 	challenge, err := svc.GenerateChallenge(context.Background(), kp.Address())
 	require.NoError(t, err)
