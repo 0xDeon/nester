@@ -417,7 +417,5 @@ function WalletBalanceTable({
             </tbody>
         </table>
         </div>
-        </AppShell>
-        </ProtectedRoute>
     );
 }

@@ -34,6 +34,7 @@ func (h *IntelligenceHandler) GetVaultRecommendations(w http.ResponseWriter, r *
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	_ = recs
 }
 
 func (h *IntelligenceHandler) GetMarketSentiment(w http.ResponseWriter, r *http.Request) {

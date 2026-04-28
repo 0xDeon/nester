@@ -22,4 +22,5 @@ pub enum ContractError {
     SlippageExceeded = 17,
     FeeTooHigh = 18,
     ConfigOutOfRange = 19,
+    ArithmeticOverflow = 20,
 }
