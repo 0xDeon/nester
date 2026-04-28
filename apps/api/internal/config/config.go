@@ -25,6 +25,15 @@ type Config struct {
 	log                   LogConfig
 	allowedOrigins        []string
 	performance           PerformanceConfig
+	startup               StartupConfig
+}
+
+// StartupConfig governs one-shot work performed before the server begins
+// accepting traffic (migrations, dependency reachability checks).
+type StartupConfig struct {
+	enableAutoMigrate bool
+	migrationsDir     string
+	dependencyTimeout time.Duration
 }
 
 type PerformanceConfig struct {
@@ -32,11 +41,14 @@ type PerformanceConfig struct {
 }
 
 type ServerConfig struct {
-	host             string
-	port             int
-	readTimeout      time.Duration
-	writeTimeout     time.Duration
-	gracefulShutdown time.Duration
+	host              string
+	port              int
+	readTimeout       time.Duration
+	readHeaderTimeout time.Duration
+	writeTimeout      time.Duration
+	idleTimeout       time.Duration
+	gracefulShutdown  time.Duration
+	maxHeaderBytes    int
 }
 
 type DatabaseConfig struct {
@@ -95,11 +107,14 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		environment: environment,
 		server: ServerConfig{
-			host:             loader.stringDefault("SERVER_HOST", "0.0.0.0"),
-			port:             loader.intDefault("SERVER_PORT", 8080),
-			readTimeout:      loader.durationDefault("SERVER_READ_TIMEOUT", 15*time.Second),
-			writeTimeout:     loader.durationDefault("SERVER_WRITE_TIMEOUT", 15*time.Second),
-			gracefulShutdown: loader.durationDefault("SERVER_SHUTDOWN_TIMEOUT", 20*time.Second),
+			host:              loader.stringDefault("SERVER_HOST", "0.0.0.0"),
+			port:              loader.intDefault("SERVER_PORT", 8080),
+			readTimeout:       loader.durationDefault("SERVER_READ_TIMEOUT", 15*time.Second),
+			readHeaderTimeout: loader.durationDefault("SERVER_READ_HEADER_TIMEOUT", 10*time.Second),
+			writeTimeout:      loader.durationDefault("SERVER_WRITE_TIMEOUT", 15*time.Second),
+			idleTimeout:       loader.durationDefault("SERVER_IDLE_TIMEOUT", 60*time.Second),
+			gracefulShutdown:  loader.durationDefault("SERVER_SHUTDOWN_TIMEOUT", 20*time.Second),
+			maxHeaderBytes:    loader.intDefault("SERVER_MAX_HEADER_BYTES", 1<<20),
 		},
 		database: DatabaseConfig{
 			dsn:               loader.requiredString("DATABASE_DSN"),
@@ -136,6 +151,11 @@ func Load() (*Config, error) {
 		allowedOrigins: loader.stringSliceDefault("ALLOWED_ORIGINS", nil),
 		performance: PerformanceConfig{
 			snapshotInterval: loader.durationDefault("PERFORMANCE_SNAPSHOT_INTERVAL", 1*time.Hour),
+		},
+		startup: StartupConfig{
+			enableAutoMigrate: loader.boolDefault("ENABLE_AUTO_MIGRATE", false),
+			migrationsDir:     loader.stringDefault("MIGRATIONS_DIR", "./migrations"),
+			dependencyTimeout: loader.durationDefault("STARTUP_DEPENDENCY_TIMEOUT", 5*time.Second),
 		},
 	}
 
@@ -188,6 +208,22 @@ func (c Config) Performance() PerformanceConfig {
 	return c.performance
 }
 
+func (c Config) Startup() StartupConfig {
+	return c.startup
+}
+
+func (s StartupConfig) EnableAutoMigrate() bool {
+	return s.enableAutoMigrate
+}
+
+func (s StartupConfig) MigrationsDir() string {
+	return s.migrationsDir
+}
+
+func (s StartupConfig) DependencyTimeout() time.Duration {
+	return s.dependencyTimeout
+}
+
 func (p PerformanceConfig) SnapshotInterval() time.Duration {
 	return p.snapshotInterval
 }
@@ -217,12 +253,32 @@ func (c *Config) validate(loader *envLoader) {
 		loader.addError("SERVER_READ_TIMEOUT must be greater than 0")
 	}
 
+	if c.server.readHeaderTimeout <= 0 {
+		loader.addError("SERVER_READ_HEADER_TIMEOUT must be greater than 0")
+	}
+
 	if c.server.writeTimeout <= 0 {
 		loader.addError("SERVER_WRITE_TIMEOUT must be greater than 0")
 	}
 
+	if c.server.idleTimeout <= 0 {
+		loader.addError("SERVER_IDLE_TIMEOUT must be greater than 0")
+	}
+
 	if c.server.gracefulShutdown <= 0 {
 		loader.addError("SERVER_SHUTDOWN_TIMEOUT must be greater than 0")
+	}
+
+	if c.server.maxHeaderBytes <= 0 {
+		loader.addError("SERVER_MAX_HEADER_BYTES must be greater than 0")
+	}
+
+	if c.startup.dependencyTimeout <= 0 {
+		loader.addError("STARTUP_DEPENDENCY_TIMEOUT must be greater than 0")
+	}
+
+	if strings.TrimSpace(c.startup.migrationsDir) == "" {
+		loader.addError("MIGRATIONS_DIR must not be empty")
 	}
 
 	if c.database.poolSize <= 0 {
@@ -317,12 +373,24 @@ func (s ServerConfig) ReadTimeout() time.Duration {
 	return s.readTimeout
 }
 
+func (s ServerConfig) ReadHeaderTimeout() time.Duration {
+	return s.readHeaderTimeout
+}
+
 func (s ServerConfig) WriteTimeout() time.Duration {
 	return s.writeTimeout
 }
 
+func (s ServerConfig) IdleTimeout() time.Duration {
+	return s.idleTimeout
+}
+
 func (s ServerConfig) GracefulShutdown() time.Duration {
 	return s.gracefulShutdown
+}
+
+func (s ServerConfig) MaxHeaderBytes() int {
+	return s.maxHeaderBytes
 }
 
 func (s ServerConfig) Address() string {
@@ -461,6 +529,19 @@ func (l *envLoader) stringSliceDefault(key string, fallback []string) []string {
 		}
 	}
 	return out
+}
+
+func (l *envLoader) boolDefault(key string, fallback bool) bool {
+	raw, ok := l.lookup(key)
+	if !ok {
+		return fallback
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		l.addError(fmt.Sprintf("%s must be a boolean (true/false), got %q", key, raw))
+		return fallback
+	}
+	return value
 }
 
 func (l *envLoader) durationDefault(key string, fallback time.Duration) time.Duration {

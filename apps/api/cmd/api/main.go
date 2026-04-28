@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 
 	"github.com/suncrestlabs/nester/apps/api/internal/auth"
 	"github.com/suncrestlabs/nester/apps/api/internal/config"
+	dbpkg "github.com/suncrestlabs/nester/apps/api/internal/db"
 	"github.com/suncrestlabs/nester/apps/api/internal/handler"
 	"github.com/suncrestlabs/nester/apps/api/internal/middleware"
 	"github.com/suncrestlabs/nester/apps/api/internal/oracle"
@@ -29,6 +31,7 @@ import (
 	"github.com/suncrestlabs/nester/apps/api/internal/repository/postgres"
 	"github.com/suncrestlabs/nester/apps/api/internal/service"
 	performancesvc "github.com/suncrestlabs/nester/apps/api/internal/service/performance"
+	stellarpkg "github.com/suncrestlabs/nester/apps/api/internal/stellar"
 	"github.com/suncrestlabs/nester/apps/api/internal/ws"
 	logpkg "github.com/suncrestlabs/nester/apps/api/pkg/logger"
 )
@@ -43,6 +46,8 @@ func main() {
 }
 
 func run() error {
+	startedAt := time.Now()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -61,6 +66,20 @@ func run() error {
 
 	db := stdlib.OpenDBFromPool(pgPool.Pool)
 	defer db.Close()
+
+	if cfg.Startup().EnableAutoMigrate() {
+		baseLogger.Info("running database migrations", "dir", cfg.Startup().MigrationsDir())
+		if err := dbpkg.MigrateUp(db, cfg.Startup().MigrationsDir()); err != nil {
+			return fmt.Errorf("auto-migrate: %w", err)
+		}
+		baseLogger.Info("database migrations complete")
+	} else {
+		baseLogger.Info("auto-migrate disabled; skipping migrations")
+	}
+
+	if err := pingStellarDependencies(baseLogger, cfg); err != nil {
+		return err
+	}
 
 	vaultRepository := postgres.NewVaultRepository(db)
 	vaultService := service.NewVaultService(vaultRepository)
@@ -154,10 +173,28 @@ func run() error {
 		}
 	}()
 
+	// ready tracks whether the server is accepting traffic. Flipped to false on
+	// shutdown so load balancers stop routing before in-flight drain begins.
+	var ready atomic.Bool
+	ready.Store(true)
+
+	depHTTPClient := &http.Client{Timeout: cfg.Startup().DependencyTimeout()}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", healthHandler(pgPool, cfg.Database().ConnectionTimeout()))
-	mux.HandleFunc("GET /healthz", healthHandler(pgPool, cfg.Database().ConnectionTimeout()))
-	mux.HandleFunc("GET /readyz", healthHandler(pgPool, cfg.Database().ConnectionTimeout()))
+	mux.HandleFunc("GET /health", livenessHandler(&ready))
+	mux.HandleFunc("GET /healthz", livenessHandler(&ready))
+	mux.HandleFunc("GET /readyz", readinessHandler(&ready, pgPool, cfg.Database().ConnectionTimeout()))
+	mux.HandleFunc("GET /health/detailed", detailedHealthHandler(detailedHealthDeps{
+		ready:        &ready,
+		pgPool:       pgPool,
+		dbTimeout:    cfg.Database().ConnectionTimeout(),
+		httpClient:   depHTTPClient,
+		horizonURL:   cfg.Stellar().HorizonURL(),
+		rpcURL:       cfg.Stellar().RPCURL(),
+		startedAt:    startedAt,
+		environment:  cfg.Environment(),
+		buildVersion: version,
+	}))
 	vaultHandler.Register(mux)
 	transactionHandler.Register(mux)
 	settlementHandler.Register(mux)
@@ -215,11 +252,22 @@ func run() error {
 				),
 			),
 		),
-		ReadTimeout:  cfg.Server().ReadTimeout(),
-		WriteTimeout: cfg.Server().WriteTimeout(),
+		ReadTimeout:       cfg.Server().ReadTimeout(),
+		ReadHeaderTimeout: cfg.Server().ReadHeaderTimeout(),
+		WriteTimeout:      cfg.Server().WriteTimeout(),
+		IdleTimeout:       cfg.Server().IdleTimeout(),
+		MaxHeaderBytes:    cfg.Server().MaxHeaderBytes(),
 	}
 
-	baseLogger.Info("starting server", "addr", cfg.Server().Address(), "environment", cfg.Environment())
+	baseLogger.Info("starting server",
+		"addr", cfg.Server().Address(),
+		"environment", cfg.Environment(),
+		"version", version,
+		"horizon_url", cfg.Stellar().HorizonURL(),
+		"rpc_url", cfg.Stellar().RPCURL(),
+		"network_passphrase", cfg.Stellar().NetworkPassphrase(),
+		"auto_migrate", cfg.Startup().EnableAutoMigrate(),
+	)
 
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -240,15 +288,20 @@ func run() error {
 	case err := <-serverErr:
 		return err
 	case <-shutdownCtx.Done():
-		baseLogger.Info("shutdown signal received")
+		baseLogger.Info("shutdown signal received, draining")
 	}
 
 	stop()
+
+	// Flip readiness immediately so load balancers stop routing new traffic
+	// to this instance before we wait for in-flight requests to complete.
+	ready.Store(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server().GracefulShutdown())
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
+		baseLogger.Error("graceful shutdown timed out", "error", err.Error())
 		return err
 	}
 
@@ -256,7 +309,9 @@ func run() error {
 		return err
 	}
 
-	baseLogger.Info("server stopped")
+	baseLogger.Info("server stopped",
+		"uptime", time.Since(startedAt).String(),
+	)
 	return nil
 }
 
@@ -271,19 +326,180 @@ func walletKeyFromContext(r *http.Request) string {
 	return u.WalletAddress
 }
 
-func healthHandler(db *repository.PostgresDB, timeout time.Duration) http.HandlerFunc {
+// livenessHandler returns 200 while the process is healthy and 503 once
+// shutdown has begun. It performs no external calls so load balancers can
+// poll it cheaply.
+func livenessHandler(ready *atomic.Bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
-
-		if err := db.Ping(ctx); err != nil {
-			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if !ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("draining"))
 			return
 		}
-
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}
+}
+
+// readinessHandler returns 200 only when the database is reachable and the
+// process is not draining. Used by orchestrators that need to know when this
+// instance can serve traffic.
+func readinessHandler(ready *atomic.Bool, db *repository.PostgresDB, timeout time.Duration) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if !ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("draining"))
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		if err := db.Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("database unavailable"))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}
+}
+
+type detailedHealthDeps struct {
+	ready        *atomic.Bool
+	pgPool       *repository.PostgresDB
+	dbTimeout    time.Duration
+	httpClient   *http.Client
+	horizonURL   string
+	rpcURL       string
+	startedAt    time.Time
+	environment  string
+	buildVersion string
+}
+
+type dependencyStatus struct {
+	OK            bool   `json:"ok"`
+	Endpoint      string `json:"endpoint,omitempty"`
+	LatencyMillis int64  `json:"latency_ms,omitempty"`
+	Error         string `json:"error,omitempty"`
+	LatestLedger  uint64 `json:"latest_ledger,omitempty"`
+}
+
+type dbStatus struct {
+	OK            bool   `json:"ok"`
+	LatencyMillis int64  `json:"latency_ms,omitempty"`
+	Error         string `json:"error,omitempty"`
+	MaxConns      int32  `json:"max_conns"`
+	AcquiredConns int32  `json:"acquired_conns"`
+	IdleConns     int32  `json:"idle_conns"`
+	TotalConns    int32  `json:"total_conns"`
+}
+
+type detailedHealthResponse struct {
+	Status       string           `json:"status"`
+	Environment  string           `json:"environment"`
+	Version      string           `json:"version"`
+	UptimeSecs   int64            `json:"uptime_seconds"`
+	Database     dbStatus         `json:"database"`
+	Horizon      dependencyStatus `json:"horizon"`
+	SorobanRPC   dependencyStatus `json:"soroban_rpc"`
+	GeneratedAt  time.Time        `json:"generated_at"`
+}
+
+func detailedHealthHandler(deps detailedHealthDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp := detailedHealthResponse{
+			Status:      "ok",
+			Environment: deps.environment,
+			Version:     deps.buildVersion,
+			UptimeSecs:  int64(time.Since(deps.startedAt).Seconds()),
+			GeneratedAt: time.Now().UTC(),
+		}
+
+		// Database
+		dbCtx, dbCancel := context.WithTimeout(r.Context(), deps.dbTimeout)
+		dbStart := time.Now()
+		dbErr := deps.pgPool.Ping(dbCtx)
+		dbCancel()
+		stat := deps.pgPool.Pool.Stat()
+		resp.Database = dbStatus{
+			OK:            dbErr == nil,
+			LatencyMillis: time.Since(dbStart).Milliseconds(),
+			MaxConns:      stat.MaxConns(),
+			AcquiredConns: stat.AcquiredConns(),
+			IdleConns:     stat.IdleConns(),
+			TotalConns:    stat.TotalConns(),
+		}
+		if dbErr != nil {
+			resp.Database.Error = dbErr.Error()
+		}
+
+		// Horizon
+		hStart := time.Now()
+		hRes := stellarpkg.PingHorizon(r.Context(), deps.httpClient, deps.horizonURL)
+		resp.Horizon = dependencyStatus{
+			OK:            hRes.OK,
+			Endpoint:      hRes.Endpoint,
+			Error:         hRes.Error,
+			LatencyMillis: time.Since(hStart).Milliseconds(),
+			LatestLedger:  hRes.LatestLedger,
+		}
+
+		// Soroban RPC
+		rStart := time.Now()
+		rRes := stellarpkg.PingSorobanRPC(r.Context(), deps.httpClient, deps.rpcURL)
+		resp.SorobanRPC = dependencyStatus{
+			OK:            rRes.OK,
+			Endpoint:      rRes.Endpoint,
+			Error:         rRes.Error,
+			LatencyMillis: time.Since(rStart).Milliseconds(),
+			LatestLedger:  rRes.LatestLedger,
+		}
+
+		degraded := !resp.Database.OK || !resp.Horizon.OK || !resp.SorobanRPC.OK
+		draining := !deps.ready.Load()
+		switch {
+		case draining:
+			resp.Status = "draining"
+		case degraded:
+			resp.Status = "degraded"
+		}
+
+		status := http.StatusOK
+		if draining || !resp.Database.OK {
+			status = http.StatusServiceUnavailable
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// pingStellarDependencies verifies Horizon and Soroban RPC are reachable
+// before the server starts accepting traffic. Failure here exits the process
+// so orchestrators can restart against a healthy node.
+func pingStellarDependencies(logger *slog.Logger, cfg *config.Config) error {
+	timeout := cfg.Startup().DependencyTimeout()
+	client := &http.Client{Timeout: timeout}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if res := stellarpkg.PingHorizon(ctx, client, cfg.Stellar().HorizonURL()); !res.OK {
+		return fmt.Errorf("horizon unreachable at %s: %s", cfg.Stellar().HorizonURL(), res.Error)
+	} else {
+		logger.Info("horizon reachable", "url", cfg.Stellar().HorizonURL(), "latest_ledger", res.LatestLedger)
+	}
+
+	rpcCtx, rpcCancel := context.WithTimeout(context.Background(), timeout)
+	defer rpcCancel()
+	if res := stellarpkg.PingSorobanRPC(rpcCtx, client, cfg.Stellar().RPCURL()); !res.OK {
+		return fmt.Errorf("soroban rpc unreachable at %s: %s", cfg.Stellar().RPCURL(), res.Error)
+	} else {
+		logger.Info("soroban rpc reachable", "url", cfg.Stellar().RPCURL(), "latest_ledger", res.LatestLedger)
+	}
+
+	return nil
 }
 
 func startEventIndexer(ctx context.Context, logger *slog.Logger, db *sql.DB, rpcURL string) {
