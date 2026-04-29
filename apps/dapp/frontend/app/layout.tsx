@@ -14,13 +14,45 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-    title: "Nester | DApp",
+    title: {
+        default: "Nester | DApp",
+        template: "%s | Nester",
+    },
     description:
         "Decentralized savings and instant fiat settlements powered by Stellar.",
+    metadataBase: new URL(
+        process.env.NEXT_PUBLIC_APP_URL ?? "https://app.nesterhq.com"
+    ),
+    openGraph: {
+        type: "website",
+        siteName: "Nester",
+        title: "Nester | DApp",
+        description:
+            "Decentralized savings and instant fiat settlements powered by Stellar.",
+        url: process.env.NEXT_PUBLIC_APP_URL ?? "https://app.nesterhq.com",
+        images: [
+            {
+                url: "/og-image.png",
+                width: 1200,
+                height: 630,
+                alt: "Nester — Decentralized Savings & Instant Fiat Settlements",
+            },
+        ],
+    },
+    twitter: {
+        card: "summary_large_image",
+        title: "Nester | DApp",
+        description:
+            "Decentralized savings and instant fiat settlements powered by Stellar.",
+        images: ["/og-image.png"],
+        creator: "@TheNesterHQ",
+    },
     icons: {
         icon: "/logo.png",
         apple: "/logo.png",
     },
+    themeColor: "#0f172a",
+    canonical: process.env.NEXT_PUBLIC_APP_URL ?? "https://app.nesterhq.com",
 };
 
 import { SettingsProvider } from "@/context/settings-context";
