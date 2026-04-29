@@ -26,6 +26,7 @@ type Config struct {
 	allowedOrigins        []string
 	performance           PerformanceConfig
 	startup               StartupConfig
+	bank                  BankConfig
 }
 
 // StartupConfig governs one-shot work performed before the server begins
@@ -86,6 +87,11 @@ type LogConfig struct {
 
 type RedisConfig struct {
 	addr string
+}
+
+type BankConfig struct {
+	paystackKey    string
+	flutterwaveKey string
 }
 
 func Load() (*Config, error) {
@@ -156,6 +162,10 @@ func Load() (*Config, error) {
 			enableAutoMigrate: loader.boolDefault("ENABLE_AUTO_MIGRATE", false),
 			migrationsDir:     loader.stringDefault("MIGRATIONS_DIR", "./migrations"),
 			dependencyTimeout: loader.durationDefault("STARTUP_DEPENDENCY_TIMEOUT", 5*time.Second),
+		},
+		bank: BankConfig{
+			paystackKey:    loader.stringDefault("PAYSTACK_SECRET_KEY", ""),
+			flutterwaveKey: loader.stringDefault("FLUTTERWAVE_SECRET_KEY", ""),
 		},
 	}
 
@@ -238,6 +248,18 @@ func (c Config) AllowedOrigins() []string {
 
 func (r RedisConfig) Addr() string {
 	return r.addr
+}
+
+func (c Config) Bank() BankConfig {
+	return c.bank
+}
+
+func (b BankConfig) PaystackKey() string {
+	return b.paystackKey
+}
+
+func (b BankConfig) FlutterwaveKey() string {
+	return b.flutterwaveKey
 }
 
 func (c *Config) validate(loader *envLoader) {
