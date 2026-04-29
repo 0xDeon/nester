@@ -19,7 +19,7 @@ const navLinks = [
 ]
 
 const PROD_DAPP_URL = "https://nesterdapp.netlify.app"
-const LOCAL_DAPP_URL = "http://localhost:3001"
+const LOCAL_DAPP_URL = process.env.NEXT_PUBLIC_DAPP_URL ?? "http://localhost:3001"
 
 export function Navbar() {
     const [isScrolled, setIsScrolled] = React.useState(false)
