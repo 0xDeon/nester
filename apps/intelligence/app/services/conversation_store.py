@@ -1,58 +1,98 @@
-"""In-memory per-user conversation history with TTL eviction."""
+"""Redis-backed per-user conversation history with TTL eviction.
 
-from datetime import UTC, datetime, timedelta
+Replaces the previous in-memory ConversationStore to solve:
+- Data loss on service restart
+- Cross-instance inconsistency behind a load balancer
+- Unbounded memory growth in long-running deployments
+
+Each user's history is stored as a JSON list under key
+``nester:conversation:{user_id}`` with a configurable TTL.
+"""
+
+import json
+import logging
+
+import redis
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+_KEY_PREFIX = "nester:conversation"
 
 
-class ConversationStore:
-    """Stores chat history keyed by user_id.
+class RedisConversationStore:
+    """Stores chat history in Redis, keyed by user_id.
 
-    Each entry is a list of Anthropic-format message dicts
+    Each entry is a JSON-serialised list of Anthropic-format message dicts
     ({"role": "user"|"assistant", "content": str}).
 
-    Entries are evicted after `ttl_minutes` of inactivity.
-    Call `evict_stale()` periodically (e.g. in a background task)
-    or it will be called lazily on every `get` / `append`.
+    Keys expire after *ttl_seconds* of inactivity (reset on every write).
+    Only the most recent *max_turns* messages are retained to cap token spend.
     """
 
-    def __init__(self, ttl_minutes: int = 60, max_turns: int = 20) -> None:
-        self._ttl = timedelta(minutes=ttl_minutes)
-        self._max_turns = max_turns  # keep last N messages to cap token spend
-        self._store: dict[str, list[dict[str, str]]] = {}
-        self._touched: dict[str, datetime] = {}
+    def __init__(
+        self,
+        client: redis.Redis,  # type: ignore[type-arg]
+        ttl_seconds: int = 3600,
+        max_turns: int = 20,
+    ) -> None:
+        self._redis = client
+        self._ttl = ttl_seconds
+        self._max_turns = max_turns
+
+    # ------------------------------------------------------------------
+    # Key helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _key(user_id: str) -> str:
+        return f"{_KEY_PREFIX}:{user_id}"
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def get(self, user_id: str) -> list[dict[str, str]]:
-        self._evict_stale()
-        return list(self._store.get(user_id, []))
+        raw = self._redis.get(self._key(user_id))
+        if raw is None:
+            return []
+        try:
+            history: list[dict[str, str]] = json.loads(raw)
+            return history
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Corrupt conversation data for user %s, resetting.", user_id)
+            self.clear(user_id)
+            return []
 
     def append(self, user_id: str, role: str, content: str) -> None:
-        self._evict_stale()
-        if user_id not in self._store:
-            self._store[user_id] = []
-        self._store[user_id].append({"role": role, "content": content})
-        # Trim to last max_turns messages (preserve pairs: user+assistant)
-        if len(self._store[user_id]) > self._max_turns:
-            self._store[user_id] = self._store[user_id][-self._max_turns :]
-        self._touched[user_id] = datetime.now(UTC)
+        history = self.get(user_id)
+        history.append({"role": role, "content": content})
+
+        # Trim to last max_turns messages
+        if len(history) > self._max_turns:
+            history = history[-self._max_turns :]
+
+        self._redis.setex(
+            self._key(user_id),
+            self._ttl,
+            json.dumps(history),
+        )
 
     def clear(self, user_id: str) -> None:
-        self._store.pop(user_id, None)
-        self._touched.pop(user_id, None)
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
-    def _evict_stale(self) -> None:
-        cutoff = datetime.now(UTC) - self._ttl
-        stale = [uid for uid, t in self._touched.items() if t < cutoff]
-        for uid in stale:
-            self._store.pop(uid, None)
-            self._touched.pop(uid, None)
+        self._redis.delete(self._key(user_id))
 
 
+# ---------------------------------------------------------------------------
 # Module-level singleton shared across requests
-store = ConversationStore(ttl_minutes=60, max_turns=20)
+# ---------------------------------------------------------------------------
+
+def _build_store() -> RedisConversationStore:
+    client: redis.Redis = redis.Redis.from_url(  # type: ignore[type-arg]
+        settings.redis_url,
+        decode_responses=True,
+    )
+    return RedisConversationStore(client, ttl_seconds=3600, max_turns=20)
+
+
+store = _build_store()
