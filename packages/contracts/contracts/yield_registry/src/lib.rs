@@ -41,6 +41,12 @@ const DEFAULT_RISK_RATING: u32 = 5;
 const MAX_RISK_RATING: u32 = 10;
 pub const MAX_APY_HISTORY: u32 = 16;
 
+// Hard cap for APY stored on-chain (basis points). 10000 == 100% APY.
+const MAX_APY_BPS: u32 = 10_000;
+// Maximum single-update deviation (bps) allowed relative to last stored APY.
+// For example, 2000 == 20% absolute bps change allowed in a single update.
+const MAX_APY_SINGLE_UPDATE_DEVIATION_BPS: u32 = 5_000; // 50% absolute bps
+
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct SourceAddedEventData {
@@ -308,7 +314,26 @@ impl YieldRegistryContract {
         caller.require_auth();
         require_admin_or_operator(&env, &caller);
 
+        // Validate range before touching storage
+        if new_apy_bps > MAX_APY_BPS {
+            panic_with_error!(env, ContractError::InvalidAmount);
+        }
+
         let mut source = get_source_or_panic(&env, &id);
+
+        // Deviation guard: reject single-update jumps that are implausible
+        let last_apy = source.current_apy_bps;
+        if last_apy != 0 {
+            let deviation = if new_apy_bps > last_apy {
+                new_apy_bps - last_apy
+            } else {
+                last_apy - new_apy_bps
+            };
+            if deviation > MAX_APY_SINGLE_UPDATE_DEVIATION_BPS {
+                panic_with_error!(env, ContractError::InvalidOperation);
+            }
+        }
+
         source.current_apy_bps = new_apy_bps;
         append_apy_snapshot(&env, &mut source, new_apy_bps);
         touch_source(&env, &mut source);
