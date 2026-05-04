@@ -9,6 +9,7 @@ no extra infrastructure.
 import json
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from app.config import settings
 
@@ -25,14 +26,14 @@ _KEY_PREFIX = "nester:conv:"
 
 class _RedisConversationStore:
     def __init__(self, redis_url: str) -> None:
-        import redis as _redis  # type: ignore[import-untyped]
+        import redis as _redis
         self._client = _redis.from_url(redis_url, decode_responses=True)
 
     def _key(self, user_id: str) -> str:
         return f"{_KEY_PREFIX}{user_id}"
 
     def get(self, user_id: str) -> list[dict[str, str]]:
-        raw = self._client.get(self._key(user_id))
+        raw: str | None = self._client.get(self._key(user_id))  # type: ignore[assignment]
         if not raw:
             return []
         try:
@@ -66,16 +67,8 @@ class _InMemoryConversationStore:
         self._touched: dict[str, datetime] = {}
 
     def get(self, user_id: str) -> list[dict[str, str]]:
-        raw = self._redis.get(self._key(user_id))
-        if raw is None:
-            return []
-        try:
-            history: list[dict[str, str]] = json.loads(raw)
-            return history
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Corrupt conversation data for user %s, resetting.", user_id)
-            self.clear(user_id)
-            return []
+        self._evict_stale()
+        return list(self._store.get(user_id, []))
 
     def append(self, user_id: str, role: str, content: str) -> None:
         self._evict_stale()
@@ -102,7 +95,7 @@ class _InMemoryConversationStore:
 # Protocol type for type checking
 # ---------------------------------------------------------------------------
 
-class ConversationStore:
+class ConversationStore(Protocol):
     def get(self, user_id: str) -> list[dict[str, str]]: ...
     def append(self, user_id: str, role: str, content: str) -> None: ...
     def clear(self, user_id: str) -> None: ...
@@ -118,7 +111,7 @@ def _build_store() -> _RedisConversationStore | _InMemoryConversationStore:
         try:
             s = _RedisConversationStore(redis_url)
             # Cheap connectivity check at startup
-            s._client.ping()  # type: ignore[union-attr]
+            s._client.ping()
             logger.info("conversation store: redis (%s)", redis_url)
             return s
         except Exception as exc:

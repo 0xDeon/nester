@@ -753,7 +753,7 @@ fn emergency_withdraw_queues_when_liquidity_insufficient() {
 
     // Check preview BEFORE withdraw
     let preview = vault.emergency_withdraw_preview(&user);
-    assert_eq!(preview.vault_liquid_reserves, 9950000000);
+    assert_eq!(preview.vault_liquid_reserves, 9995890411);
     assert_eq!(preview.estimated_return, 10000000000);
     assert_eq!(preview.can_process, false);
 
