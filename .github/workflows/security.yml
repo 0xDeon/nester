@@ -52,14 +52,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm ci
-
       - name: Warn on moderate vulnerabilities
-        run: npm audit --audit-level=moderate || true
+        run: npm audit --package-lock-only --audit-level=moderate || true
 
       - name: Fail on high and critical vulnerabilities
-        run: npm audit --audit-level=high || true
+        run: npm audit --package-lock-only --audit-level=high || true
 
   audit-go:
     name: Dependency Audit (Go)
@@ -141,27 +138,27 @@ jobs:
               print("No pip-audit report generated")
               raise SystemExit(0)
 
-            findings = json.loads(report.read_text() or "[]")
-            dependencies = findings.get("dependencies", []) if isinstance(findings, dict) else findings
+          findings = json.loads(report.read_text() or "[]")
+          dependencies = findings.get("dependencies", []) if isinstance(findings, dict) else findings
 
-            moderate = 0
-            unknown = 0
-            for dep in dependencies:
+          moderate = 0
+          unknown = 0
+          for dep in dependencies:
               for vuln in dep.get("vulns", []):
-                severity = str(vuln.get("severity", "")).lower()
-                cvss = vuln.get("cvss")
-                if severity in {"moderate", "medium"}:
-                  moderate += 1
-                elif isinstance(cvss, (int, float)) and 4.0 <= cvss < 7.0:
-                  moderate += 1
-                elif not severity and cvss is None:
-                  unknown += 1
+                  severity = str(vuln.get("severity", "")).lower()
+                  cvss = vuln.get("cvss")
+                  if severity in {"moderate", "medium"}:
+                      moderate += 1
+                  elif isinstance(cvss, (int, float)) and 4.0 <= cvss < 7.0:
+                      moderate += 1
+                  elif not severity and cvss is None:
+                      unknown += 1
 
-            if moderate:
+          if moderate:
               print(f"::warning::{moderate} moderate Python vulnerabilities detected")
-            if unknown:
+          if unknown:
               print(f"::warning::{unknown} Python vulnerabilities detected with unknown severity")
-            if not moderate and not unknown:
+          if not moderate and not unknown:
               print("No moderate Python vulnerabilities detected")
           PY
 
@@ -176,19 +173,19 @@ jobs:
               print("pip-audit report missing")
               raise SystemExit(1)
 
-            findings = json.loads(report.read_text() or "[]")
-            dependencies = findings.get("dependencies", []) if isinstance(findings, dict) else findings
-            vulns = []
+          findings = json.loads(report.read_text() or "[]")
+          dependencies = findings.get("dependencies", []) if isinstance(findings, dict) else findings
+          vulns = []
 
-            for dep in dependencies:
+          for dep in dependencies:
               for vuln in dep.get("vulns", []):
-                severity = str(vuln.get("severity", "")).lower()
-                cvss = vuln.get("cvss")
-                if severity in {"high", "critical"}:
-                  vulns.append(vuln)
-                  continue
-                if isinstance(cvss, (int, float)) and cvss >= 7.0:
-                  vulns.append(vuln)
+                  severity = str(vuln.get("severity", "")).lower()
+                  cvss = vuln.get("cvss")
+                  if severity in {"high", "critical"}:
+                      vulns.append(vuln)
+                      continue
+                  if isinstance(cvss, (int, float)) and cvss >= 7.0:
+                      vulns.append(vuln)
 
           if vulns:
               print(f"Found {len(vulns)} high/critical Python vulnerabilities")
