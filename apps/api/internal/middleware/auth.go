@@ -111,5 +111,5 @@ func matchRule(rules []RouteRule, r *http.Request) *RouteRule {
 func writeMiddlewareError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"success":false,"error":{"code":%d,"message":%q}}`, status, msg)
+	fmt.Fprintf(w, `{"success":false,"error":{"code":%d,"message":%q}}`, status, msg) // #nosec G705 -- JSON API, Content-Type is application/json, no HTML context
 }

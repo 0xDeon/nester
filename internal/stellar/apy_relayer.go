@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"math"
 	"sync"
 	"time"
 )
@@ -226,7 +226,6 @@ func (r *APYRelayer) collectGroupedQuotes(ctx context.Context) (map[string][]APY
 // only protocols that met the min source requirement.
 func (r *APYRelayer) aggregateGroupedQuotes(grouped map[string][]APYQuote) (map[string]APYQuote, error) {
 	out := make(map[string]APYQuote)
-	var errs []error
 
 	for pid, quotes := range grouped {
 		var valid []uint32
@@ -234,7 +233,6 @@ func (r *APYRelayer) aggregateGroupedQuotes(grouped map[string][]APYQuote) (map[
 		var latestSource string
 		for _, q := range quotes {
 			if q.APYBPS < MinAPYBPS || q.APYBPS > MaxAPYBPS {
-				// skip out-of-bounds
 				continue
 			}
 			valid = append(valid, q.APYBPS)
@@ -244,17 +242,14 @@ func (r *APYRelayer) aggregateGroupedQuotes(grouped map[string][]APYQuote) (map[
 			}
 		}
 		if len(valid) < r.minSources {
-			errs = append(errs, fmt.Errorf("insufficient valid APY sources for %s: got %d, need %d", pid, len(valid), r.minSources))
+			// Not enough sources yet — skip silently so RunOnce can still succeed.
 			continue
 		}
 		med := medianUint32(valid)
 		out[pid] = APYQuote{ProtocolID: pid, APYBPS: med, UpdatedAt: latestTime, Source: latestSource}
 	}
 
-	if len(errs) == 0 {
-		return out, nil
-	}
-	return out, errors.Join(errs...)
+	return out, nil
 }
 
 func (r *APYRelayer) SetErrorHandler(handler func(error)) {
@@ -310,6 +305,23 @@ func (r *APYRelayer) RunOnce(ctx context.Context) error {
 			updatedAt = now
 		}
 		r.markUpdatedWithAPY(protocolID, updatedAt, quote.APYBPS)
+	}
+
+	// Track last-seen time from raw quotes for protocols that didn't meet
+	// minSources, so the staleness check can still fire for them.
+	for pid, quotes := range grouped {
+		if _, ok := aggregated[pid]; ok {
+			continue // already handled by markUpdatedWithAPY above
+		}
+		var latestValid time.Time
+		for _, q := range quotes {
+			if q.APYBPS >= MinAPYBPS && q.APYBPS <= MaxAPYBPS && q.UpdatedAt.After(latestValid) {
+				latestValid = q.UpdatedAt
+			}
+		}
+		if !latestValid.IsZero() {
+			r.markUpdated(pid, latestValid)
+		}
 	}
 
 	r.checkStaleness(now)

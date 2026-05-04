@@ -121,8 +121,14 @@ func CalculateRealizedAPY(currentBalance, totalDeposited decimal.Decimal, daysEl
 		return decimal.Zero
 	}
 	apy := (math.Pow(ratio, 365.0/daysElapsed) - 1) * 100
-	if math.IsNaN(apy) || math.IsInf(apy, 0) {
+	if math.IsNaN(apy) {
 		return decimal.Zero
+	}
+	if math.IsInf(apy, 1) {
+		return decimal.NewFromFloat(10000)
+	}
+	if math.IsInf(apy, -1) {
+		return decimal.NewFromFloat(-1000)
 	}
 	if apy > 10000 {
 		apy = 10000

@@ -5,6 +5,7 @@ import { usePortfolio, type PortfolioPosition } from "@/components/portfolio-pro
 import { AppShell } from "@/components/app-shell";
 import { ProtectedRoute } from "@/components/protected-route";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     RefreshCw,

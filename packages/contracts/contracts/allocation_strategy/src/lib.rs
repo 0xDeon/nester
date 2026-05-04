@@ -267,57 +267,25 @@ impl AllocationStrategyContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
-    pub fn compute_allocation(env: Env, apys: Vec<SourceApy>) -> Vec<AllocationWeight> {
-        let registry_id: Address = env.storage().instance().get(&DataKey::RegistryId).unwrap();
-        let vault_type = Self::get_vault_type(env.clone());
-        let params = Self::get_strategy_params(env.clone());
-
-        let mut results = zero_weights_from_entries(&env, &apys);
-        let mut eligible_indices = Vec::new(&env);
-        let mut scores = Vec::new(&env);
-
-        for (index, entry) in apys.iter().enumerate() {
-            let is_registered = registry_has_source(&env, &registry_id, &entry.source_id);
-            let is_active = is_registered
-                && registry_get_source_status(&env, &registry_id, &entry.source_id)
-                    == SourceStatus::Active;
-
-            if is_active && entry.apy_bps > 0 {
-                eligible_indices.push_back(index as u32);
-                let score = match vault_type {
-                    VaultType::DeFi500 => 1_i128,
-                    _ => entry.apy_bps,
-                };
-                scores.push_back(score);
-            }
-        }
-
-        if eligible_indices.len() > 0 {
-            let computed = match vault_type {
-                VaultType::DeFi500 => even_distribution(&env, eligible_indices.len() as usize),
-                _ => proportional_with_cap(&env, &scores, params.max_weight_bps),
-            };
-
-            for (slot, index) in eligible_indices.iter().enumerate() {
-                let mut weight = results.get(index).unwrap();
-                weight.weight_bps = computed.get(slot as u32).unwrap();
-                results.set(index, weight);
-            }
-        }
-
-        results
+    pub fn compute_allocation(
+        env: Env,
+        caller: Address,
+        apys: Vec<SourceApy>,
+    ) -> Vec<AllocationWeight> {
+        caller.require_auth();
+        require_admin_or_operator(&env, &caller);
+        compute_weights(&env, apys)
     }
 
     pub fn set_allocations(env: Env, operator: Address, total_amount: i128, apys: Vec<SourceApy>) {
-        // verify the signature of caller
         operator.require_auth();
 
         if !AccessControl::has_role(&env, &operator, Role::Operator) {
             panic!("Caller is not an authorized operator");
         }
 
-        // perform computation
-        let results = Self::compute_allocation(env.clone(), apys);
+        // Call the inner compute directly to avoid a second require_auth for the same address.
+        let results = compute_weights(&env, apys);
 
         // side checks
         env.storage().instance().set(&DataKey::Weights, &results);
@@ -790,6 +758,47 @@ fn validate_weight_sum(env: &Env, weights: &Vec<AllocationWeight>) {
     if sum != BASIS_POINT_SCALE {
         panic_with_error!(env, ContractError::AllocationError);
     }
+}
+
+fn compute_weights(env: &Env, apys: Vec<SourceApy>) -> Vec<AllocationWeight> {
+    let registry_id: Address = env.storage().instance().get(&DataKey::RegistryId).unwrap();
+    let vault_type = AllocationStrategyContract::get_vault_type(env.clone());
+    let params = AllocationStrategyContract::get_strategy_params(env.clone());
+
+    let mut results = zero_weights_from_entries(env, &apys);
+    let mut eligible_indices = Vec::new(env);
+    let mut scores = Vec::new(env);
+
+    for (index, entry) in apys.iter().enumerate() {
+        let is_registered = registry_has_source(env, &registry_id, &entry.source_id);
+        let is_active = is_registered
+            && registry_get_source_status(env, &registry_id, &entry.source_id)
+                == SourceStatus::Active;
+
+        if is_active && entry.apy_bps > 0 {
+            eligible_indices.push_back(index as u32);
+            let score = match vault_type {
+                VaultType::DeFi500 => 1_i128,
+                _ => entry.apy_bps,
+            };
+            scores.push_back(score);
+        }
+    }
+
+    if eligible_indices.len() > 0 {
+        let computed = match vault_type {
+            VaultType::DeFi500 => even_distribution(env, eligible_indices.len() as usize),
+            _ => proportional_with_cap(env, &scores, params.max_weight_bps),
+        };
+
+        for (slot, index) in eligible_indices.iter().enumerate() {
+            let mut weight = results.get(index).unwrap();
+            weight.weight_bps = computed.get(slot as u32).unwrap();
+            results.set(index, weight);
+        }
+    }
+
+    results
 }
 
 fn persist_allocations(env: &Env, total_amount: i128, weights: &Vec<AllocationWeight>) {

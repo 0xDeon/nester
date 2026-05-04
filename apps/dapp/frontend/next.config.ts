@@ -19,7 +19,7 @@ const apiHosts = [
 
 const cspDirectives = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-eval' 'unsafe-inline'", // We may need unsafe-eval and unsafe-inline for Next.js dev
+  "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
   `connect-src 'self' ${[...stellarRpcHosts, ...apiHosts].join(" ")} wss://api.nester.finance`,
   "img-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline'",
@@ -35,10 +35,12 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
 ];
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+
   async headers() {
     return [
       {
@@ -47,13 +49,16 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+
   async rewrites() {
+    // Only the intelligence service is proxied through Next.js — the Go API
+    // is accessed directly via NEXT_PUBLIC_API_URL from the client.
     const intelligenceUrl =
       process.env.INTELLIGENCE_SERVICE_URL ?? "http://localhost:8000";
     return [
       {
-        source: "/api/v1/:path*",
-        destination: `${intelligenceUrl}/:path*`,
+        source: "/intelligence/:path*",
+        destination: `${intelligenceUrl}/intelligence/:path*`,
       },
     ];
   },

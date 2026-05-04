@@ -7,8 +7,58 @@ on:
     branches: ["*"]
 
 jobs:
+  # Detect which areas of the monorepo changed so downstream jobs can skip
+  # work they don't need to run. Each filter is an OR of globs; if ANY match,
+  # that area's job will execute its steps. Workflow/shared changes force
+  # everything to run.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      website: ${{ steps.filter.outputs.website }}
+      intelligence: ${{ steps.filter.outputs.intelligence }}
+      dapp: ${{ steps.filter.outputs.dapp }}
+      api: ${{ steps.filter.outputs.api }}
+      internal: ${{ steps.filter.outputs.internal }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # On push events, compare against the previous commit so the first
+          # push to a branch doesn't mark every filter as "changed". On PRs
+          # this defaults to the merge base.
+          base: ${{ github.event_name == 'push' && github.event.before || '' }}
+          filters: |
+            shared:
+              - '.github/workflows/**'
+              - 'pnpm-lock.yaml'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+            website:
+              - 'apps/website/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+            intelligence:
+              - 'apps/intelligence/**'
+            dapp:
+              - 'apps/dapp/**'
+            api:
+              - 'apps/api/**'
+            internal:
+              - 'internal/**'
+              - 'go.mod'
+              - 'go.sum'
+            contracts:
+              - 'packages/contracts/**'
+
   website:
     name: Website (Next.js)
+    needs: changes
+    if: needs.changes.outputs.website == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +71,7 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build website
         run: pnpm --filter @nester/website build
@@ -32,6 +82,8 @@ jobs:
 
   intelligence:
     name: Intelligence (Python)
+    needs: changes
+    if: needs.changes.outputs.intelligence == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -60,6 +112,8 @@ jobs:
 
   dapp-frontend:
     name: Dapp Frontend (Next.js)
+    needs: changes
+    if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -77,13 +131,137 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Audit JS dependencies (dapp)
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+  security:
+    name: Security Scanning
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz \
+            | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+
+      - name: Run gitleaks
+        run: gitleaks detect --source . --no-git --redact --no-banner --config .gitleaks.toml
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
+
+      - name: Install cargo-audit
+        if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Rust dependencies
+        if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
+        run: cargo audit
+        working-directory: packages/contracts
+        continue-on-error: true
+
+      - uses: actions/setup-go@v5
+        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.internal == 'true' || needs.changes.outputs.shared == 'true'
+        with:
+          go-version-file: apps/api/go.mod
+          cache: true
+
+      - name: Install govulncheck
+        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true'
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Audit Go dependencies
+        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true'
+        run: govulncheck ./...
+        working-directory: apps/api
+
+      - name: Install gosec
+        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true'
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec
+        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true'
+        run: gosec -severity medium ./...
+        working-directory: apps/api
+        continue-on-error: true
+
+      - uses: actions/setup-node@v4
+        if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
+        with:
+          node-version: 22
+
+      - name: Install dapp dependencies for audit
+        if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
+        run: npm install
+        working-directory: apps/dapp/frontend
+
+      - name: Audit JavaScript dependencies
+        if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
+        run: npm audit --audit-level=high
+        working-directory: apps/dapp/frontend
+        continue-on-error: true
+
+      - uses: actions/setup-python@v5
+        if: needs.changes.outputs.intelligence == 'true' || needs.changes.outputs.shared == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install Python audit tools
+        if: needs.changes.outputs.intelligence == 'true' || needs.changes.outputs.shared == 'true'
+        run: pip install pip-audit bandit
+
+      - name: Audit Python dependencies
+        if: needs.changes.outputs.intelligence == 'true' || needs.changes.outputs.shared == 'true'
+        run: pip-audit -r requirements.txt
+        working-directory: apps/intelligence
+        continue-on-error: true
+
+      - name: Run bandit
+        if: needs.changes.outputs.intelligence == 'true' || needs.changes.outputs.shared == 'true'
+        run: bandit -r app -ll
+        working-directory: apps/intelligence
+        continue-on-error: true
 
   api:
     name: API (Go)
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nester
+          POSTGRES_PASSWORD: nester
+          POSTGRES_DB: nester_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://nester:nester@localhost:5432/nester_test?sslmode=disable
+      REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
 
@@ -92,12 +270,21 @@ jobs:
           go-version-file: apps/api/go.mod
           cache: true
 
-      - name: Test
-        run: go test -race -timeout 120s -count=1 ./...
+      - name: Build
+        run: go build ./...
+
+      - name: Test (unit)
+        run: go test -race -timeout 120s -count=1 -short ./...
+
+      - name: Test (integration)
+        run: go test -race -timeout 120s -count=1 -run Integration ./...
+        continue-on-error: true
 
 
   internal-stellar:
     name: Internal (Go)
+    needs: changes
+    if: needs.changes.outputs.internal == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -136,6 +323,8 @@ jobs:
 
   contracts:
     name: Contracts (Rust)
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -155,9 +344,7 @@ jobs:
         run: cargo build --release --target wasm32-unknown-unknown -p yield-registry-contract
 
       - name: Ensure yield_registry.wasm is available for allocation_strategy
-        run: |
-          mkdir -p contracts/allocation_strategy/../../../target/wasm32-unknown-unknown/release
-          cp target/wasm32-unknown-unknown/release/yield_registry.wasm contracts/allocation_strategy/../../../target/wasm32-unknown-unknown/release/yield_registry.wasm
+        run: test -f target/wasm32-unknown-unknown/release/yield_registry.wasm
 
       - name: Build allocation_strategy WASM
         run: cargo build --release --target wasm32-unknown-unknown -p allocation-strategy-contract

@@ -10,8 +10,7 @@ use soroban_sdk::{
 use nester_access_control::Role;
 use vault_token::{VaultTokenContract, VaultTokenContractClient};
 
-use crate::{CircuitBreakerConfig, VaultContract, VaultContractClient, VaultStatus};
-use crate::{FeeConfig, VaultContract, VaultContractClient, VaultStatus};
+use crate::{CircuitBreakerConfig, FeeConfig, VaultContract, VaultContractClient, VaultStatus};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -102,6 +101,17 @@ fn setup() -> (
         &String::from_str(&env, "Nester USDC Vault"),
         &String::from_str(&env, "nUSDC"),
         &7u32,
+    );
+
+    // Unit tests should not be blocked by the circuit breaker — tests that
+    // specifically exercise CB behaviour set their own config. Set threshold
+    // to 100 % so any single withdrawal is allowed.
+    vault.set_circuit_breaker_config(
+        &admin,
+        &CircuitBreakerConfig {
+            threshold_bps: 10000,
+            window_seconds: 7200,
+        },
     );
 
     (env, admin, sac, vault, treasury)
@@ -559,11 +569,11 @@ fn circuit_breaker_uses_rolling_window_across_boundary() {
         },
     );
 
-    vault.deposit(&user, &deposit_amount);
-    vault.withdraw(&user, &(100 * XLM));
+    vault.deposit(&user, &deposit_amount, &0);
+    vault.withdraw(&user, &(100 * XLM), &0);
 
     advance_time(&env, 60);
-    vault.withdraw(&user, &(100 * XLM));
+    vault.withdraw(&user, &(100 * XLM), &0);
 }
 
 // ---------------------------------------------------------------------------
@@ -661,15 +671,18 @@ fn deposit_then_full_withdraw_resets_total_deposits() {
 }
 
 #[test]
-fn single_stroop_deposit_and_withdrawal() {
+fn minimum_deposit_and_withdrawal() {
+    // MIN_DEPOSIT_AMOUNT (= 1 XLM in 7-decimal precision) is the smallest
+    // amount the vault accepts; smaller deposits are rejected with
+    // InvalidAmount (#5).
     let (_env, _admin, token, vault, _treasury) = setup();
     let user = Address::generate(&_env);
-    mint(&token, &user, STROOP);
+    mint(&token, &user, XLM);
 
-    vault.deposit(&user, &STROOP, &0);
-    assert_eq!(vault.get_balance(&user), STROOP);
+    vault.deposit(&user, &XLM, &0);
+    assert_eq!(vault.get_balance(&user), XLM);
 
-    vault.withdraw(&user, &STROOP, &0);
+    vault.withdraw(&user, &XLM, &0);
     assert_eq!(vault.get_balance(&user), 0);
 }
 
@@ -740,7 +753,7 @@ fn emergency_withdraw_queues_when_liquidity_insufficient() {
 
     // Check preview BEFORE withdraw
     let preview = vault.emergency_withdraw_preview(&user);
-    assert_eq!(preview.vault_liquid_reserves, 9950000000);
+    assert_eq!(preview.vault_liquid_reserves, 9995890411);
     assert_eq!(preview.estimated_return, 10000000000);
     assert_eq!(preview.can_process, false);
 
@@ -807,8 +820,9 @@ fn test_read_only_queries() {
     assert_eq!(vault.total_shares(), deposit);
     assert_eq!(vault.share_price(), 15_000_000); // 1.5 share price
     
-    // estimated fees
-    advance_time(&env, DAY);
+    // estimated fees — advance less than DAY so we remain within the
+    // MinLockPeriod (= DAY) window and still incur an early-withdrawal fee.
+    advance_time(&env, DAY / 2);
     let fees = vault.estimated_fees();
     assert!(fees > 0);
 

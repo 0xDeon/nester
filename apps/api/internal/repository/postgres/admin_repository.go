@@ -138,7 +138,7 @@ func (r *AdminRepository) ListVaults(
 		WHERE %s
 		ORDER BY %s %s
 		LIMIT $%d OFFSET $%d
-	`, where, sortColumn, order, len(args)+1, len(args)+2)
+	`, where, sortColumn, order, len(args)+1, len(args)+2) // #nosec G201 -- sortColumn/order come from sanitize* whitelist functions; values use $N placeholders
 
 	args = append(args, filter.PerPage, offset)
 	rows, err := r.db.QueryContext(ctx, listQuery, args...)
@@ -347,7 +347,7 @@ func (r *AdminRepository) ListSettlements(
 		WHERE %s
 		ORDER BY %s %s
 		LIMIT $%d OFFSET $%d
-	`, where, sortColumn, order, len(args)+1, len(args)+2)
+	`, where, sortColumn, order, len(args)+1, len(args)+2) // #nosec G201 -- sortColumn/order come from sanitize* whitelist functions; values use $N placeholders
 
 	args = append(args, filter.PerPage, offset)
 	rows, err := r.db.QueryContext(ctx, listQuery, args...)
@@ -489,7 +489,7 @@ func (r *AdminRepository) ListUsers(
 		GROUP BY u.id, u.wallet_address, u.display_name, u.kyc_status, u.created_at, u.updated_at
 		ORDER BY %s %s
 		LIMIT $%d OFFSET $%d
-	`, where, sortColumn, order, len(args)+1, len(args)+2)
+	`, where, sortColumn, order, len(args)+1, len(args)+2) // #nosec G201 -- sortColumn/order come from sanitize* whitelist functions; values use $N placeholders
 
 	args = append(args, filter.PerPage, offset)
 	rows, err := r.db.QueryContext(ctx, listQuery, args...)

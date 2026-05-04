@@ -96,11 +96,18 @@ func (s *RateService) fetch(ctx context.Context, base, quote string) (ExchangeRa
 	}
 }
 
+// Sanity bounds for XLM/USD price. These are intentionally wide — they exist
+// to catch feed corruption (e.g. a 1000× spike), not to predict the market.
+const (
+	xlmMinUSD = 0.001  // XLM has never traded this low
+	xlmMaxUSD = 100.0  // XLM at $100 would be an unprecedented 200× from its ATH
+)
+
 func (s *RateService) fetchXLM(ctx context.Context) (ExchangeRate, error) {
 	var lastErr error
 	for _, p := range s.xlmFetchers {
 		rate, err := p.Fetch(ctx, "XLM", "USD")
-		if err == nil && rate > 0 {
+		if err == nil && rate >= xlmMinUSD && rate <= xlmMaxUSD {
 			now := time.Now().UTC()
 			return ExchangeRate{
 				Base: "XLM", Quote: "USD", Rate: rate,
@@ -109,6 +116,8 @@ func (s *RateService) fetchXLM(ctx context.Context) (ExchangeRate, error) {
 		}
 		if err != nil {
 			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("xlm: rate %v outside sanity bounds [%v, %v]", rate, xlmMinUSD, xlmMaxUSD)
 		}
 	}
 	if lastErr == nil {

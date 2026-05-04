@@ -42,7 +42,7 @@ func MigrateUp(db *sql.DB, dir string) error {
 			continue
 		}
 
-		content, err := os.ReadFile(filepath.Join(dir, file))
+		content, err := os.ReadFile(filepath.Join(dir, file)) // #nosec G304 -- dir is a controlled deployment path, file is from the filesystem listing
 		if err != nil {
 			return fmt.Errorf("migrate up: read %s: %w", file, err)
 		}
@@ -93,7 +93,7 @@ func MigrateDown(db *sql.DB, dir string) error {
 	}
 
 	downFile := version + ".down.sql"
-	content, err := os.ReadFile(filepath.Join(dir, downFile))
+	content, err := os.ReadFile(filepath.Join(dir, downFile)) // #nosec G304 -- dir is a controlled deployment path, downFile is derived from a known version string
 	if err != nil {
 		return fmt.Errorf("migrate down: read %s: %w", downFile, err)
 	}

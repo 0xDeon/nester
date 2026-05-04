@@ -2,8 +2,10 @@
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.dependencies.auth import verify_jwt
 from app.services.conversation_store import store as conversation_store
@@ -11,9 +13,13 @@ from app.services.prometheus import stream_chat
 
 router = APIRouter(dependencies=[Depends(verify_jwt)])
 
+_limiter = Limiter(key_func=get_remote_address)
+
 
 @router.get("/chat")
+@_limiter.limit("30/minute")
 async def chat(
+    request: Request,
     message: str = Query(..., description="User message to Prometheus"),
     claims: dict[str, Any] = Depends(verify_jwt),
 ) -> StreamingResponse:

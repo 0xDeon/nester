@@ -1,98 +1,129 @@
-"""Redis-backed per-user conversation history with TTL eviction.
+"""Per-user conversation history with TTL eviction.
 
-Replaces the previous in-memory ConversationStore to solve:
-- Data loss on service restart
-- Cross-instance inconsistency behind a load balancer
-- Unbounded memory growth in long-running deployments
-
-Each user's history is stored as a JSON list under key
-``nester:conversation:{user_id}`` with a configurable TTL.
+Uses Redis when INTELLIGENCE_REDIS_URL is configured so that all worker
+instances share state and conversations survive restarts.  Falls back to an
+in-process dict when Redis is unavailable so dev and test environments need
+no extra infrastructure.
 """
 
 import json
 import logging
-
-import redis
+from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_KEY_PREFIX = "nester:conversation"
+_TTL_SECONDS = 3600  # 1 hour of inactivity
+_MAX_TURNS = 20       # keep the last N messages to cap token spend
+_KEY_PREFIX = "nester:conv:"
 
 
-class RedisConversationStore:
-    """Stores chat history in Redis, keyed by user_id.
+# ---------------------------------------------------------------------------
+# Redis-backed store
+# ---------------------------------------------------------------------------
 
-    Each entry is a JSON-serialised list of Anthropic-format message dicts
-    ({"role": "user"|"assistant", "content": str}).
+class _RedisConversationStore:
+    def __init__(self, redis_url: str) -> None:
+        import redis as _redis
+        self._client = _redis.from_url(redis_url, decode_responses=True)
 
-    Keys expire after *ttl_seconds* of inactivity (reset on every write).
-    Only the most recent *max_turns* messages are retained to cap token spend.
-    """
-
-    def __init__(
-        self,
-        client: redis.Redis,  # type: ignore[type-arg]
-        ttl_seconds: int = 3600,
-        max_turns: int = 20,
-    ) -> None:
-        self._redis = client
-        self._ttl = ttl_seconds
-        self._max_turns = max_turns
-
-    # ------------------------------------------------------------------
-    # Key helper
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _key(user_id: str) -> str:
-        return f"{_KEY_PREFIX}:{user_id}"
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    def _key(self, user_id: str) -> str:
+        return f"{_KEY_PREFIX}{user_id}"
 
     def get(self, user_id: str) -> list[dict[str, str]]:
-        raw = self._redis.get(self._key(user_id))
-        if raw is None:
+        raw: str | None = self._client.get(self._key(user_id))  # type: ignore[assignment]
+        if not raw:
             return []
         try:
-            history: list[dict[str, str]] = json.loads(raw)
-            return history
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Corrupt conversation data for user %s, resetting.", user_id)
-            self.clear(user_id)
+            return list(json.loads(raw))
+        except Exception:
             return []
 
     def append(self, user_id: str, role: str, content: str) -> None:
+        key = self._key(user_id)
         history = self.get(user_id)
         history.append({"role": role, "content": content})
-
-        # Trim to last max_turns messages
-        if len(history) > self._max_turns:
-            history = history[-self._max_turns :]
-
-        self._redis.setex(
-            self._key(user_id),
-            self._ttl,
-            json.dumps(history),
-        )
+        if len(history) > _MAX_TURNS:
+            history = history[-_MAX_TURNS:]
+        self._client.setex(key, _TTL_SECONDS, json.dumps(history))
 
     def clear(self, user_id: str) -> None:
-        self._redis.delete(self._key(user_id))
+        self._client.delete(self._key(user_id))
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton shared across requests
+# In-memory fallback store
 # ---------------------------------------------------------------------------
 
-def _build_store() -> RedisConversationStore:
-    client: redis.Redis = redis.Redis.from_url(  # type: ignore[type-arg]
-        settings.redis_url,
-        decode_responses=True,
-    )
-    return RedisConversationStore(client, ttl_seconds=3600, max_turns=20)
+class _InMemoryConversationStore:
+    """Stores chat history keyed by user_id with TTL eviction."""
+
+    def __init__(self, ttl_minutes: int = 60, max_turns: int = 20) -> None:
+        self._ttl = timedelta(minutes=ttl_minutes)
+        self._max_turns = max_turns
+        self._store: dict[str, list[dict[str, str]]] = {}
+        self._touched: dict[str, datetime] = {}
+
+    def get(self, user_id: str) -> list[dict[str, str]]:
+        self._evict_stale()
+        return list(self._store.get(user_id, []))
+
+    def append(self, user_id: str, role: str, content: str) -> None:
+        self._evict_stale()
+        if user_id not in self._store:
+            self._store[user_id] = []
+        self._store[user_id].append({"role": role, "content": content})
+        if len(self._store[user_id]) > self._max_turns:
+            self._store[user_id] = self._store[user_id][-self._max_turns:]
+        self._touched[user_id] = datetime.now(UTC)
+
+    def clear(self, user_id: str) -> None:
+        self._store.pop(user_id, None)
+        self._touched.pop(user_id, None)
+
+    def _evict_stale(self) -> None:
+        cutoff = datetime.now(UTC) - self._ttl
+        stale = [uid for uid, t in self._touched.items() if t < cutoff]
+        for uid in stale:
+            self._store.pop(uid, None)
+            self._touched.pop(uid, None)
 
 
-store = _build_store()
+# ---------------------------------------------------------------------------
+# Protocol type for type checking
+# ---------------------------------------------------------------------------
+
+class ConversationStore(Protocol):
+    def get(self, user_id: str) -> list[dict[str, str]]: ...
+    def append(self, user_id: str, role: str, content: str) -> None: ...
+    def clear(self, user_id: str) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton — shared across all requests in this worker
+# ---------------------------------------------------------------------------
+
+def _build_store() -> _RedisConversationStore | _InMemoryConversationStore:
+    redis_url = settings.redis_url
+    if redis_url:
+        try:
+            s = _RedisConversationStore(redis_url)
+            # Cheap connectivity check at startup
+            s._client.ping()
+            logger.info("conversation store: redis (%s)", redis_url)
+            return s
+        except Exception as exc:
+            logger.warning(
+                "conversation store: redis unavailable (%s), using in-memory fallback", exc
+            )
+    else:
+        logger.info(
+            "conversation store: in-memory (single-instance only; "
+            "set INTELLIGENCE_REDIS_URL for production)"
+        )
+    return _InMemoryConversationStore(ttl_minutes=60, max_turns=_MAX_TURNS)
+
+
+store: _RedisConversationStore | _InMemoryConversationStore = _build_store()

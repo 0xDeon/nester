@@ -147,7 +147,11 @@ func run() error {
 		if token == "" {
 			return "", fmt.Errorf("missing token")
 		}
-		return "user-id-from-token", nil // Placeholder for actual JWT validation
+		claims, err := auth.ParseJWT(token, cfg.Auth().Secret())
+		if err != nil {
+			return "", fmt.Errorf("invalid token: %w", err)
+		}
+		return claims.Subject, nil
 	})
 
 	wsCtx, wsCancel := context.WithCancel(context.Background())
