@@ -326,7 +326,6 @@ fn compute_allocation_preserves_weight_and_amount_invariants() {
     for total in [1_i128, 7_i128, 101_i128, 10_001_i128] {
         let weights = client.compute_allocation(
             &admin,
-            &total,
             &vec![
                 &env,
                 SourceApy {
@@ -359,7 +358,6 @@ fn conservative_strategy_caps_individual_protocol_weight() {
 
     let weights = client.compute_allocation(
         &admin,
-        &10_000_i128,
         &vec![
             &env,
             SourceApy {
@@ -388,7 +386,6 @@ fn growth_strategy_allocates_more_to_higher_apy_sources() {
 
     let weights = client.compute_allocation(
         &admin,
-        &10_000_i128,
         &vec![
             &env,
             SourceApy {
@@ -421,7 +418,6 @@ fn defi500_strategy_distributes_evenly_across_registered_sources() {
 
     let weights = client.compute_allocation(
         &admin,
-        &10_000_i128,
         &vec![
             &env,
             SourceApy {
@@ -459,7 +455,6 @@ fn zero_apy_source_receives_zero_allocation_weight() {
 
     let weights = client.compute_allocation(
         &admin,
-        &10_000_i128,
         &vec![
             &env,
             SourceApy {
@@ -494,7 +489,6 @@ fn deactivated_and_unregistered_sources_receive_zero_weight() {
 
     let weights = client.compute_allocation(
         &admin,
-        &10_000_i128,
         &vec![
             &env,
             SourceApy {

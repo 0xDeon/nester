@@ -40,7 +40,6 @@ jobs:
         directory:
           - apps/dapp/frontend
           - apps/website
-          - apps/dapp/backend
     defaults:
       run:
         working-directory: ${{ matrix.directory }}

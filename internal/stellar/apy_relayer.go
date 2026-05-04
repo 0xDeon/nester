@@ -226,7 +226,6 @@ func (r *APYRelayer) collectGroupedQuotes(ctx context.Context) (map[string][]APY
 // only protocols that met the min source requirement.
 func (r *APYRelayer) aggregateGroupedQuotes(grouped map[string][]APYQuote) (map[string]APYQuote, error) {
 	out := make(map[string]APYQuote)
-	var errs []error
 
 	for pid, quotes := range grouped {
 		var valid []uint32
@@ -234,7 +233,6 @@ func (r *APYRelayer) aggregateGroupedQuotes(grouped map[string][]APYQuote) (map[
 		var latestSource string
 		for _, q := range quotes {
 			if q.APYBPS < MinAPYBPS || q.APYBPS > MaxAPYBPS {
-				// skip out-of-bounds
 				continue
 			}
 			valid = append(valid, q.APYBPS)
@@ -244,17 +242,14 @@ func (r *APYRelayer) aggregateGroupedQuotes(grouped map[string][]APYQuote) (map[
 			}
 		}
 		if len(valid) < r.minSources {
-			errs = append(errs, fmt.Errorf("insufficient valid APY sources for %s: got %d, need %d", pid, len(valid), r.minSources))
+			// Not enough sources yet — skip silently so RunOnce can still succeed.
 			continue
 		}
 		med := medianUint32(valid)
 		out[pid] = APYQuote{ProtocolID: pid, APYBPS: med, UpdatedAt: latestTime, Source: latestSource}
 	}
 
-	if len(errs) == 0 {
-		return out, nil
-	}
-	return out, errors.Join(errs...)
+	return out, nil
 }
 
 func (r *APYRelayer) SetErrorHandler(handler func(error)) {

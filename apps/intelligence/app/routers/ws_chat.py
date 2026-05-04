@@ -80,7 +80,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         pass
-    except Exception as exc:
+    except Exception:
         try:
             await websocket.send_json({"type": "error", "message": "Internal error"})
         except Exception:

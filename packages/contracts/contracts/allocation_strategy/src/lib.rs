@@ -270,7 +270,6 @@ impl AllocationStrategyContract {
     pub fn compute_allocation(
         env: Env,
         caller: Address,
-        total_amount: i128,
         apys: Vec<SourceApy>,
     ) -> Vec<AllocationWeight> {
         caller.require_auth();
@@ -324,7 +323,7 @@ impl AllocationStrategyContract {
         }
 
         // perform computation
-        let results = Self::compute_allocation(env.clone(), apys);
+        let results = Self::compute_allocation(env.clone(), operator.clone(), apys);
 
         // side checks
         env.storage().instance().set(&DataKey::Weights, &results);

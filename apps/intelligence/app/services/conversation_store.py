@@ -122,9 +122,14 @@ def _build_store() -> _RedisConversationStore | _InMemoryConversationStore:
             logger.info("conversation store: redis (%s)", redis_url)
             return s
         except Exception as exc:
-            logger.warning("conversation store: redis unavailable (%s), using in-memory fallback", exc)
+            logger.warning(
+                "conversation store: redis unavailable (%s), using in-memory fallback", exc
+            )
     else:
-        logger.info("conversation store: in-memory (single-instance only; set INTELLIGENCE_REDIS_URL for production)")
+        logger.info(
+            "conversation store: in-memory (single-instance only; "
+            "set INTELLIGENCE_REDIS_URL for production)"
+        )
     return _InMemoryConversationStore(ttl_minutes=60, max_turns=_MAX_TURNS)
 
 
