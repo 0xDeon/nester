@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"math"
 	"sync"
 	"time"
 )
@@ -71,6 +72,11 @@ func ssrfSafeTransport() *http.Transport {
 
 const defaultAPYStalenessThreshold = time.Hour
 
+const (
+	MinAPYBPS = 0
+	MaxAPYBPS = 10_000
+)
+
 type APYQuote struct {
 	ProtocolID string
 	APYBPS     uint32
@@ -108,6 +114,13 @@ type APYRelayer struct {
 	mu           sync.Mutex
 	lastUpdated  map[string]time.Time
 	staleAlerted map[string]bool
+	// Track last-applied APY per protocol (bps) for deviation checks
+	lastAPY map[string]uint32
+	// Maximum allowed relative deviation (e.g., 0.5 == 50%) between
+	// incoming APY and last stored APY before requiring manual review.
+	maxDeviationPct float64
+	// Minimum number of independent sources required to accept an aggregated APY
+	minSources int
 }
 
 func NewAPYRelayer(
@@ -144,7 +157,104 @@ func NewAPYRelayer(
 		now:                time.Now,
 		lastUpdated:        make(map[string]time.Time),
 		staleAlerted:       make(map[string]bool),
+		lastAPY:            make(map[string]uint32),
+		maxDeviationPct:    0.5, // default 50% allowed single-update deviation
+		minSources:         2,
 	}, nil
+}
+
+// medianUint32 returns the median of the input slice. If even length, returns the rounded average.
+func medianUint32(vals []uint32) uint32 {
+	if len(vals) == 0 {
+		return 0
+	}
+	// copy and sort
+	s := make([]uint32, len(vals))
+	copy(s, vals)
+	for i := 1; i < len(s); i++ {
+		key := s[i]
+		j := i - 1
+		for j >= 0 && s[j] > key {
+			s[j+1] = s[j]
+			j--
+		}
+		s[j+1] = key
+	}
+	n := len(s)
+	if n%2 == 1 {
+		return s[n/2]
+	}
+	a := float64(s[n/2-1])
+	b := float64(s[n/2])
+	return uint32(math.Round((a + b) / 2.0))
+}
+
+// collectGroupedQuotes gathers quotes from all sources grouped by protocol id.
+// It returns a map[protocolID] -> []APYQuote and an aggregated error (if any source errors occurred).
+func (r *APYRelayer) collectGroupedQuotes(ctx context.Context) (map[string][]APYQuote, error) {
+	grouped := make(map[string][]APYQuote)
+	var errs []error
+
+	for _, source := range r.sources {
+		quotes, err := source.Fetch(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s source fetch failed: %w", source.Name(), err))
+			continue
+		}
+		for _, q := range quotes {
+			if strings.TrimSpace(q.ProtocolID) == "" {
+				continue
+			}
+			if q.Source == "" {
+				q.Source = source.Name()
+			}
+			if q.UpdatedAt.IsZero() {
+				q.UpdatedAt = r.now().UTC()
+			}
+			grouped[q.ProtocolID] = append(grouped[q.ProtocolID], q)
+		}
+	}
+
+	if len(errs) == 0 {
+		return grouped, nil
+	}
+	return grouped, errors.Join(errs...)
+}
+
+// aggregateGroupedQuotes computes the median APY per protocol from grouped quotes
+// after applying bounds filtering and min source checks. Returned map includes
+// only protocols that met the min source requirement.
+func (r *APYRelayer) aggregateGroupedQuotes(grouped map[string][]APYQuote) (map[string]APYQuote, error) {
+	out := make(map[string]APYQuote)
+	var errs []error
+
+	for pid, quotes := range grouped {
+		var valid []uint32
+		var latestTime time.Time
+		var latestSource string
+		for _, q := range quotes {
+			if q.APYBPS < MinAPYBPS || q.APYBPS > MaxAPYBPS {
+				// skip out-of-bounds
+				continue
+			}
+			valid = append(valid, q.APYBPS)
+			if q.UpdatedAt.After(latestTime) {
+				latestTime = q.UpdatedAt
+				latestSource = q.Source
+			}
+		}
+		if len(valid) < r.minSources {
+			errs = append(errs, fmt.Errorf("insufficient valid APY sources for %s: got %d, need %d", pid, len(valid), r.minSources))
+			continue
+		}
+		med := medianUint32(valid)
+		out[pid] = APYQuote{ProtocolID: pid, APYBPS: med, UpdatedAt: latestTime, Source: latestSource}
+	}
+
+	if len(errs) == 0 {
+		return out, nil
+	}
+	return out, errors.Join(errs...)
 }
 
 func (r *APYRelayer) SetErrorHandler(handler func(error)) {
@@ -172,11 +282,24 @@ func (r *APYRelayer) Start(ctx context.Context) error {
 }
 
 func (r *APYRelayer) RunOnce(ctx context.Context) error {
-	quotes, collectErr := r.collectQuotes(ctx)
+	grouped, collectErr := r.collectGroupedQuotes(ctx)
 	now := r.now().UTC()
 
+	aggregated, aggErr := r.aggregateGroupedQuotes(grouped)
+
 	var updateErrs []error
-	for protocolID, quote := range quotes {
+	for protocolID, quote := range aggregated {
+		// Deviation check against last applied APY (if any)
+		r.mu.Lock()
+		last := r.lastAPY[protocolID]
+		r.mu.Unlock()
+		if err := r.checkDeviation(float64(quote.APYBPS), float64(last)); err != nil {
+			if r.onError != nil {
+				r.onError(fmt.Errorf("APY deviation for %s: %w", protocolID, err))
+			}
+			continue
+		}
+
 		if err := r.updater.UpdateAPY(ctx, r.registryID, protocolID, quote.APYBPS); err != nil {
 			updateErrs = append(updateErrs, fmt.Errorf("%s update failed for %s: %w", quote.Source, protocolID, err))
 			continue
@@ -186,26 +309,53 @@ func (r *APYRelayer) RunOnce(ctx context.Context) error {
 		if updatedAt.IsZero() {
 			updatedAt = now
 		}
-		r.markUpdated(protocolID, updatedAt)
+		r.markUpdatedWithAPY(protocolID, updatedAt, quote.APYBPS)
 	}
 
 	r.checkStaleness(now)
 
-	if len(updateErrs) > 0 && collectErr != nil {
-		updateErrs = append(updateErrs, collectErr)
+	// Combine errors: prefer reporting per-source collection errors as well
+	if len(updateErrs) > 0 {
+		updateErrs = append(updateErrs, aggErr)
+		if collectErr != nil {
+			updateErrs = append(updateErrs, collectErr)
+		}
 		return errors.Join(updateErrs...)
 	}
-	if len(updateErrs) > 0 {
-		return errors.Join(updateErrs...)
+
+	if aggErr != nil {
+		return aggErr
 	}
 	return collectErr
 }
 
 func (r *APYRelayer) markUpdated(protocolID string, updatedAt time.Time) {
+	// convenience wrapper for callers without an APY value
+	r.markUpdatedWithAPY(protocolID, updatedAt, 0)
+}
+
+// markUpdated stores last update time and last-applied APY (if > 0).
+func (r *APYRelayer) markUpdatedWithAPY(protocolID string, updatedAt time.Time, apy uint32) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.lastUpdated[protocolID] = updatedAt
 	r.staleAlerted[protocolID] = false
+	if apy > 0 {
+		r.lastAPY[protocolID] = apy
+	}
+}
+
+// (removed overloaded markUpdated wrapper)
+
+func (r *APYRelayer) checkDeviation(newAPY, lastAPY float64) error {
+	if lastAPY == 0 {
+		return nil
+	}
+	deviation := math.Abs(newAPY-lastAPY) / lastAPY
+	if deviation > r.maxDeviationPct {
+		return fmt.Errorf("APY deviation %.2f%% exceeds max %.2f%% — requires manual confirmation", deviation*100, r.maxDeviationPct*100)
+	}
+	return nil
 }
 
 func (r *APYRelayer) collectQuotes(ctx context.Context) (map[string]APYQuote, error) {

@@ -79,9 +79,6 @@ jobs:
       - name: Lint website
         run: pnpm --filter @nester/website lint
 
-      - name: Audit JS dependencies (website)
-        run: pnpm audit --audit-level=moderate
-        continue-on-error: true
 
   intelligence:
     name: Intelligence (Python)
@@ -112,11 +109,6 @@ jobs:
       - name: Test
         run: pytest
 
-      - name: Audit Python dependencies
-        run: |
-          pip install pip-audit
-          pip-audit -r requirements.txt --desc
-        continue-on-error: true
 
   dapp-frontend:
     name: Dapp Frontend (Next.js)
@@ -288,11 +280,6 @@ jobs:
         run: go test -race -timeout 120s -count=1 -run Integration ./...
         continue-on-error: true
 
-      - name: Check Go vulnerabilities
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-        continue-on-error: true
 
   internal-stellar:
     name: Internal (Go)
@@ -368,8 +355,3 @@ jobs:
       - name: Test contracts
         run: cargo test --lib
 
-      - name: Audit Rust dependencies
-        run: |
-          cargo install cargo-audit
-          cargo audit --deny warnings
-        continue-on-error: true

@@ -8,6 +8,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.dependencies.auth import verify_jwt
+from app.services.conversation_store import store as conversation_store
 from app.services.prometheus import stream_chat
 
 router = APIRouter(dependencies=[Depends(verify_jwt)])
@@ -42,3 +43,22 @@ async def chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.delete("/conversation", status_code=status.HTTP_200_OK)
+async def clear_conversation(
+    claims: dict[str, Any] = Depends(verify_jwt),
+) -> dict[str, str]:
+    """Clear the authenticated user's conversation history.
+
+    The user ID is sourced from the JWT subject claim — never from the caller.
+    """
+    user_id: str = claims.get("sub", "")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing subject claim",
+        )
+    conversation_store.clear(user_id)
+    return {"message": "Conversation history cleared"}
+

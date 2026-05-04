@@ -66,8 +66,16 @@ class _InMemoryConversationStore:
         self._touched: dict[str, datetime] = {}
 
     def get(self, user_id: str) -> list[dict[str, str]]:
-        self._evict_stale()
-        return list(self._store.get(user_id, []))
+        raw = self._redis.get(self._key(user_id))
+        if raw is None:
+            return []
+        try:
+            history: list[dict[str, str]] = json.loads(raw)
+            return history
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Corrupt conversation data for user %s, resetting.", user_id)
+            self.clear(user_id)
+            return []
 
     def append(self, user_id: str, role: str, content: str) -> None:
         self._evict_stale()

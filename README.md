@@ -221,7 +221,7 @@ Follow existing patterns and conventions in the codebase. Write tests for new fu
 
 ## Links
 
-- [Website]https://nesterhq.netlify.app/)
+- [Website](https://nesterhq.netlify.app/)
 - [GitHub](https://github.com/suncrestlabs/nester)
 
 ---

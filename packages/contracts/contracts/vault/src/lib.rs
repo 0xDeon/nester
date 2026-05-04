@@ -341,7 +341,13 @@ fn accrue_management_fee(env: &Env) {
         .get(&DataKey::LastFeeAccrual)
         .unwrap_or(env.ledger().timestamp());
     let now = env.ledger().timestamp();
-    let elapsed = now.saturating_sub(last_accrual);
+    let elapsed_full = now.saturating_sub(last_accrual);
+    // Cap the per-call accrual window. If collection has been delayed for
+    // longer than the cap, the remainder is picked up on subsequent calls
+    // by advancing the cursor only by the capped interval. This bounds the
+    // intermediate values in the fee math and prevents a single delayed
+    // collection from triggering an overflow that locks fees forever.
+    let elapsed = elapsed_full.min(nester_common::fees::MAX_FEE_ACCRUAL_INTERVAL_SECONDS);
 
     if elapsed > 0 {
         let config = get_fee_config(env);
@@ -361,7 +367,10 @@ fn accrue_management_fee(env: &Env) {
             set_accrued_fees(env, new_accrued);
             sync_vault_token_total_assets(env);
         }
-        env.storage().instance().set(&DataKey::LastFeeAccrual, &now);
+        let next_cursor = last_accrual.saturating_add(elapsed);
+        env.storage()
+            .instance()
+            .set(&DataKey::LastFeeAccrual, &next_cursor);
     }
 }
 
@@ -1363,15 +1372,22 @@ impl VaultContract {
             .get(&DataKey::LastFeeAccrual)
             .unwrap_or(env.ledger().timestamp());
         let now = env.ledger().timestamp();
-        let elapsed = now.saturating_sub(last_accrual);
+        // Match the on-chain accrual cap so the estimate reflects what would
+        // actually be collected on the next call rather than an unbounded
+        // figure that can't be realised in a single transaction.
+        let elapsed = now
+            .saturating_sub(last_accrual)
+            .min(nester_common::fees::MAX_FEE_ACCRUAL_INTERVAL_SECONDS);
         if elapsed > 0 {
             let config = get_fee_config(&env);
             let total_assets = get_total_assets(&env);
-            fees += nester_common::fees::calculate_management_fee(
+            let pending = nester_common::fees::calculate_management_fee(
                 total_assets,
                 config.management_fee_bps,
                 elapsed,
-            ).unwrap_or(0);
+            )
+            .unwrap_or(0);
+            fees = fees.saturating_add(pending);
         }
         fees
     }
