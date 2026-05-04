@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"math"
 	"sync"
 	"time"
 )

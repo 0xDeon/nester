@@ -142,11 +142,12 @@ export const intelligence = {
         return payload
       }
 
+      const legacy = payload as { response?: string; confidence?: number; riskScore?: number; actions?: ChatAction[] }
       return {
-        content: payload.response ?? 'Prometheus generated a response.',
-        confidence: payload.confidence,
-        riskScore: payload.riskScore,
-        actions: payload.actions,
+        content: legacy.response ?? 'Prometheus generated a response.',
+        confidence: legacy.confidence,
+        riskScore: legacy.riskScore,
+        actions: legacy.actions,
       }
     } catch {
       return {
