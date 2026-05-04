@@ -322,28 +322,32 @@ fn operator_cannot_transfer_admin() {
 fn compute_allocation_preserves_weight_and_amount_invariants() {
     let (env, admin, _, strategy_id) = setup_with_type(VaultType::Growth);
     let client = AllocationStrategyContractClient::new(&env, &strategy_id);
+    let operator = Address::generate(&env);
+    client.grant_role(&admin, &operator, &Role::Operator);
 
+    let apys = vec![
+        &env,
+        SourceApy {
+            source_id: symbol_short!("aave"),
+            apy_bps: 150,
+        },
+        SourceApy {
+            source_id: symbol_short!("blend"),
+            apy_bps: 300,
+        },
+        SourceApy {
+            source_id: symbol_short!("comp"),
+            apy_bps: 550,
+        },
+    ];
+
+    // Weight invariant: compute_allocation weights sum to 10_000.
+    let weights = client.compute_allocation(&admin, &apys);
+    assert_eq!(weight_sum(&weights), 10_000);
+
+    // Amount invariant: set_allocations stores amounts that sum to total_amount.
     for total in [1_i128, 7_i128, 101_i128, 10_001_i128] {
-        let weights = client.compute_allocation(
-            &admin,
-            &vec![
-                &env,
-                SourceApy {
-                    source_id: symbol_short!("aave"),
-                    apy_bps: 150,
-                },
-                SourceApy {
-                    source_id: symbol_short!("blend"),
-                    apy_bps: 300,
-                },
-                SourceApy {
-                    source_id: symbol_short!("comp"),
-                    apy_bps: 550,
-                },
-            ],
-        );
-
-        assert_eq!(weight_sum(&weights), 10_000);
+        client.set_allocations(&operator, &total, &apys);
         let allocated_total = client.get_source_allocation(&symbol_short!("aave"))
             + client.get_source_allocation(&symbol_short!("blend"))
             + client.get_source_allocation(&symbol_short!("comp"));

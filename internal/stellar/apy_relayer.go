@@ -307,6 +307,23 @@ func (r *APYRelayer) RunOnce(ctx context.Context) error {
 		r.markUpdatedWithAPY(protocolID, updatedAt, quote.APYBPS)
 	}
 
+	// Track last-seen time from raw quotes for protocols that didn't meet
+	// minSources, so the staleness check can still fire for them.
+	for pid, quotes := range grouped {
+		if _, ok := aggregated[pid]; ok {
+			continue // already handled by markUpdatedWithAPY above
+		}
+		var latestValid time.Time
+		for _, q := range quotes {
+			if q.APYBPS >= MinAPYBPS && q.APYBPS <= MaxAPYBPS && q.UpdatedAt.After(latestValid) {
+				latestValid = q.UpdatedAt
+			}
+		}
+		if !latestValid.IsZero() {
+			r.markUpdated(pid, latestValid)
+		}
+	}
+
 	r.checkStaleness(now)
 
 	// Combine errors: prefer reporting per-source collection errors as well

@@ -52,7 +52,9 @@ export const metadata: Metadata = {
         apple: "/logo.png",
     },
     themeColor: "#0f172a",
-    canonical: process.env.NEXT_PUBLIC_APP_URL ?? "https://app.nesterhq.com",
+    alternates: {
+        canonical: process.env.NEXT_PUBLIC_APP_URL ?? "https://app.nesterhq.com",
+    },
 };
 
 import { SettingsProvider } from "@/context/settings-context";
