@@ -252,9 +252,12 @@ impl AllocationStrategyContract {
 
     pub fn compute_allocation(
         env: Env,
+        caller: Address,
         total_amount: i128,
         apys: Vec<SourceApy>,
     ) -> Vec<AllocationWeight> {
+        caller.require_auth();
+        require_admin_or_operator(&env, &caller);
         let registry_id: Address = env.storage().instance().get(&DataKey::RegistryId).unwrap();
         let vault_type = Self::get_vault_type(env.clone());
         let params = Self::get_strategy_params(env.clone());

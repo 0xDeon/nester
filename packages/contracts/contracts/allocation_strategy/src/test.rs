@@ -319,11 +319,12 @@ fn operator_cannot_transfer_admin() {
 
 #[test]
 fn compute_allocation_preserves_weight_and_amount_invariants() {
-    let (env, _, _, strategy_id) = setup_with_type(VaultType::Growth);
+    let (env, admin, _, strategy_id) = setup_with_type(VaultType::Growth);
     let client = AllocationStrategyContractClient::new(&env, &strategy_id);
 
     for total in [1_i128, 7_i128, 101_i128, 10_001_i128] {
         let weights = client.compute_allocation(
+            &admin,
             &total,
         &vec![
             &env,
@@ -352,10 +353,11 @@ fn compute_allocation_preserves_weight_and_amount_invariants() {
 
 #[test]
 fn conservative_strategy_caps_individual_protocol_weight() {
-    let (env, _, _, strategy_id) = setup_with_type(VaultType::Conservative);
+    let (env, admin, _, strategy_id) = setup_with_type(VaultType::Conservative);
     let client = AllocationStrategyContractClient::new(&env, &strategy_id);
 
     let weights = client.compute_allocation(
+        &admin,
         &10_000_i128,
         &vec![
             &env,
@@ -380,10 +382,11 @@ fn conservative_strategy_caps_individual_protocol_weight() {
 
 #[test]
 fn growth_strategy_allocates_more_to_higher_apy_sources() {
-    let (env, _, _, strategy_id) = setup_with_type(VaultType::Growth);
+    let (env, admin, _, strategy_id) = setup_with_type(VaultType::Growth);
     let client = AllocationStrategyContractClient::new(&env, &strategy_id);
 
     let weights = client.compute_allocation(
+        &admin,
         &10_000_i128,
         &vec![
             &env,
@@ -408,10 +411,11 @@ fn growth_strategy_allocates_more_to_higher_apy_sources() {
 
 #[test]
 fn defi500_strategy_distributes_evenly_across_registered_sources() {
-    let (env, _, _, strategy_id) = setup_with_type(VaultType::DeFi500);
+    let (env, admin, _, strategy_id) = setup_with_type(VaultType::DeFi500);
     let client = AllocationStrategyContractClient::new(&env, &strategy_id);
 
     let weights = client.compute_allocation(
+        &admin,
         &10_000_i128,
         &vec![
             &env,
@@ -437,10 +441,11 @@ fn defi500_strategy_distributes_evenly_across_registered_sources() {
 
 #[test]
 fn zero_apy_source_receives_zero_allocation_weight() {
-    let (env, _, _, strategy_id) = setup_with_type(VaultType::Growth);
+    let (env, admin, _, strategy_id) = setup_with_type(VaultType::Growth);
     let client = AllocationStrategyContractClient::new(&env, &strategy_id);
 
     let weights = client.compute_allocation(
+        &admin,
         &10_000_i128,
         &vec![
             &env,
@@ -471,6 +476,7 @@ fn deactivated_and_unregistered_sources_receive_zero_weight() {
     registry.update_status(&admin, &symbol_short!("aave"), &RegistrySourceStatus::Paused);
 
     let weights = client.compute_allocation(
+        &admin,
         &10_000_i128,
         &vec![
             &env,

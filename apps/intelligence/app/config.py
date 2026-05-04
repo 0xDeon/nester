@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
     jwt_secret: str = ""
+    redis_url: str = ""  # e.g. redis://localhost:6379/0 — empty means in-memory fallback
 
     model_config = SettingsConfigDict(
         env_prefix="INTELLIGENCE_",
