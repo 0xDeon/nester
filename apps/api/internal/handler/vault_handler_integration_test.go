@@ -45,7 +45,7 @@ func TestVaultHandlerIntegrationCreateGetListAndErrors(t *testing.T) {
 	response, err := http.Post(
 		server.URL+"/api/v1/vaults",
 		"application/json",
-		bytes.NewBufferString(`{"contract_address":"CA-H-001","currency":"USDC"}`),
+		bytes.NewBufferString(`{"contract_address":"CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","currency":"USDC"}`),
 	)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)

@@ -180,7 +180,7 @@ func (s *VaultService) RecordDeposit(ctx context.Context, input RecordDepositInp
 		if err != nil {
 			return vault.Vault{}, err
 		}
-		stroops := input.Amount.Mul(decimal.NewFromInt(10_000_000)).IntPart()
+		stroops := input.Amount.Mul(decimal.NewFromInt(10_000_000)).Round(0).IntPart()
 		if err := s.depositInvoker.DepositToVault(ctx, existing.ContractAddress, stroops); err != nil {
 			return vault.Vault{}, fmt.Errorf("on-chain deposit failed: %w", err)
 		}
@@ -375,7 +375,7 @@ func (s *VaultService) RecordWithdrawal(ctx context.Context, input RecordWithdra
 	}
 
 	if s.depositInvoker != nil {
-		stroops := input.Amount.Mul(decimal.NewFromInt(10_000_000)).IntPart()
+		stroops := input.Amount.Mul(decimal.NewFromInt(10_000_000)).Round(0).IntPart()
 		if err := s.depositInvoker.WithdrawFromVault(ctx, existing.ContractAddress, stroops); err != nil {
 			return vault.Vault{}, fmt.Errorf("on-chain withdrawal failed: %w", err)
 		}

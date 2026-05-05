@@ -18,6 +18,19 @@ import (
 	"github.com/suncrestlabs/nester/apps/api/internal/service"
 )
 
+// Valid 56-character Soroban test contract addresses (C + 55 uppercase base32 chars).
+const (
+	testAddrGetAlloc  = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testAddrList1     = "CBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testAddrList2     = "CCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testAddrCreate    = "CDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testAddrGeneric   = "CEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testAddrStatus    = "CFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testAddrNorm      = "CGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testAddrTrim      = "CHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	testAddrAllocGet  = "CIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+)
+
 // errorResponse matches the error response structure returned by the API
 type errorResponse struct {
 	Error struct {
@@ -38,7 +51,7 @@ func TestVaultHandlerGetVaultReturns200WithAllocations(t *testing.T) {
 	defer server.Close()
 
 	// Create vault
-	body := bytes.NewBufferString(`{"contract_address":"CA-GET-ALLOC-001","currency":"USDC"}`)
+	body := bytes.NewBufferString(`{"contract_address":"` + testAddrGetAlloc + `","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -154,7 +167,7 @@ func TestVaultHandlerListUserVaultsReturns200WithAllocations(t *testing.T) {
 	defer server.Close()
 
 	// Create first vault with allocations
-	body1 := bytes.NewBufferString(`{"contract_address":"CA-LIST-001","currency":"USDC"}`)
+	body1 := bytes.NewBufferString(`{"contract_address":"` + testAddrList1 + `","currency":"USDC"}`)
 	response1, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body1)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -174,7 +187,7 @@ func TestVaultHandlerListUserVaultsReturns200WithAllocations(t *testing.T) {
 	}
 
 	// Create second vault with allocations
-	body2 := bytes.NewBufferString(`{"contract_address":"CA-LIST-002","currency":"USDC"}`)
+	body2 := bytes.NewBufferString(`{"contract_address":"` + testAddrList2 + `","currency":"USDC"}`)
 	response2, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body2)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -236,7 +249,7 @@ func TestVaultHandlerCreateVaultReturns201OnSuccess(t *testing.T) {
 	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"contract_address":"CA-CREATE-001","currency":"USDC"}`)
+	body := bytes.NewBufferString(`{"contract_address":"` + testAddrCreate + `","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -255,7 +268,7 @@ func TestVaultHandlerCreateVaultReturns201OnSuccess(t *testing.T) {
 	if created.UserID != userID {
 		t.Fatalf("created vault UserID = %v, want %v", created.UserID, userID)
 	}
-	if created.ContractAddress != "CA-CREATE-001" {
+	if created.ContractAddress != testAddrCreate {
 		t.Fatalf("created vault ContractAddress = %q, want %q", created.ContractAddress, "CA-CREATE-001")
 	}
 	if created.Currency != "USDC" {
@@ -337,7 +350,7 @@ func TestVaultHandlerCreateVaultReturns404ForNonExistentUser(t *testing.T) {
 	server := httptest.NewServer(fakeAuthMiddleware(nonExistentUserID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"contract_address":"CA-001","currency":"USDC"}`)
+	body := bytes.NewBufferString(`{"contract_address":"` + testAddrGeneric + `","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -382,7 +395,7 @@ func TestVaultHandlerCreateVaultWithCustomStatus(t *testing.T) {
 	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"contract_address":"CA-STATUS-001","currency":"USDC","status":"paused"}`)
+	body := bytes.NewBufferString(`{"contract_address":"` + testAddrStatus + `","currency":"USDC","status":"paused"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -411,7 +424,7 @@ func TestVaultHandlerCreateVaultNormalizesCurrency(t *testing.T) {
 	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"contract_address":"CA-NORM-001","currency":"usdc"}`)
+	body := bytes.NewBufferString(`{"contract_address":"` + testAddrNorm + `","currency":"usdc"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -440,7 +453,7 @@ func TestVaultHandlerCreateVaultTrimsWhitespace(t *testing.T) {
 	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"contract_address":"  CA-TRIM-001  ","currency":"  USDC  "}`)
+	body := bytes.NewBufferString(`{"contract_address":"  ` + testAddrTrim + `  ","currency":"  USDC  "}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)
@@ -453,8 +466,8 @@ func TestVaultHandlerCreateVaultTrimsWhitespace(t *testing.T) {
 
 	created := decodeAPIData[vault.Vault](t, response.Body)
 
-	if created.ContractAddress != "CA-TRIM-001" {
-		t.Fatalf("created vault ContractAddress = %q, want %q", created.ContractAddress, "CA-TRIM-001")
+	if created.ContractAddress != testAddrTrim {
+		t.Fatalf("created vault ContractAddress = %q, want %q", created.ContractAddress, testAddrTrim)
 	}
 	if created.Currency != "USDC" {
 		t.Fatalf("created vault Currency = %q, want %q", created.Currency, "USDC")
@@ -473,7 +486,7 @@ func TestVaultHandler_GetAllocations_Returns200(t *testing.T) {
 	defer server.Close()
 
 	// Create vault
-	body := bytes.NewBufferString(`{"contract_address":"CA-ALLOC-GET-001","currency":"USDC"}`)
+	body := bytes.NewBufferString(`{"contract_address":"` + testAddrAllocGet + `","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)

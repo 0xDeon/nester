@@ -131,7 +131,7 @@ function calculatePositionMetrics(position: StoredPosition): PortfolioPosition {
     const maturityAt = new Date(position.maturityAt);
     const elapsedMs = Math.max(0, now.getTime() - depositedAt.getTime());
     const elapsedDays = elapsedMs / (1000 * 60 * 60 * 24);
-    const accruedYield = position.principal * position.apy * (elapsedDays / 365);
+    const accruedYield = position.principal * (Math.pow(1 + position.apy, elapsedDays / 365) - 1);
     const currentValue = position.principal + accruedYield;
     const msRemaining = maturityAt.getTime() - now.getTime();
     const daysRemaining = Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
@@ -200,7 +200,9 @@ function PortfolioStore({
     const markConfirmed = (txHash: string) => {
         setTransactions((current) =>
             current.map((tx) =>
-                tx.txHash === txHash ? { ...tx, status: "Confirmed" } : tx
+                tx.txHash === txHash && tx.status === "Pending"
+                    ? { ...tx, status: "Confirmed" }
+                    : tx
             )
         );
     };
@@ -259,8 +261,8 @@ function PortfolioStore({
                     XLM: xlm ? parseFloat(xlm.balance) : (prev.XLM ?? 0),
                     USDC: usdc ? parseFloat(usdc.balance) : (prev.USDC ?? 0),
                 }));
-            } catch {
-                // silently ignore — local balances remain as fallback
+            } catch (err) {
+                console.warn("[portfolio] Failed to fetch on-chain balances; using cached values:", err);
             }
         };
 
@@ -291,8 +293,8 @@ function PortfolioStore({
                 XLM: xlm ? parseFloat(xlm.balance) : (prev.XLM ?? 0),
                 USDC: usdc ? parseFloat(usdc.balance) : (prev.USDC ?? 0),
             }));
-        } catch {
-            // silently ignore
+        } catch (err) {
+            console.warn("[portfolio] Failed to refresh on-chain balances:", err);
         }
     };
 
@@ -326,7 +328,7 @@ function PortfolioStore({
 
     const getWithdrawalQuote = (positionId: string, grossAmount: number) => {
         const position = positions.find((item) => item.id === positionId);
-        if (!position || grossAmount <= 0 || grossAmount > position.currentValue) {
+        if (!position || grossAmount <= 0 || grossAmount > position.currentValue || position.currentValue === 0) {
             return null;
         }
 

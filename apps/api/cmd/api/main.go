@@ -152,7 +152,7 @@ func run() error {
 			return "", fmt.Errorf("invalid token: %w", err)
 		}
 		return claims.Subject, nil
-	})
+	}, cfg.AllowedOrigins())
 
 	wsCtx, wsCancel := context.WithCancel(context.Background())
 	defer wsCancel()

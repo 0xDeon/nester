@@ -60,7 +60,7 @@ func TestVaultHandlerCreateGetAndList(t *testing.T) {
 	server := httptest.NewServer(fakeAuthMiddleware(userID)(middleware.Logging(slog.New(slog.NewTextHandler(io.Discard, nil)))(mux)))
 	defer server.Close()
 
-	body := bytes.NewBufferString(`{"contract_address":"CA-001","currency":"USDC"}`)
+	body := bytes.NewBufferString(`{"contract_address":"CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","currency":"USDC"}`)
 	response, err := http.Post(server.URL+"/api/v1/vaults", "application/json", body)
 	if err != nil {
 		t.Fatalf("POST /api/v1/vaults error = %v", err)

@@ -5,7 +5,7 @@ import { useWallet } from "@/components/wallet-provider";
 import { useNotifications } from "@/components/notifications-provider";
 import { AppShell } from "@/components/app-shell";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
@@ -29,6 +29,7 @@ import {
 
 import { BANKS, type LPNode, LP_NODES } from "@/lib/settlement-data";
 import { getExplorerTxUrl } from "@/utils/explorer";
+import { usePortfolio } from "@/components/portfolio-provider";
 
 const SEND_ASSETS = [
     { symbol: "USDC", name: "USD Coin", image: "/usdc.png" },
@@ -36,6 +37,7 @@ const SEND_ASSETS = [
     { symbol: "XLM", name: "Stellar Lumens", image: "/logo.png" },
 ];
 
+// Rates are indicative defaults — LP node quotes provide the live effective rate at submission time.
 const RECEIVE_CURRENCIES = [
     { symbol: "NGN", name: "Nigerian Naira", image: "/naira.webp", rate: 1512.45 },
     { symbol: "GHS", name: "Ghanaian Cedi", image: "/naira.webp", rate: 15.80 },
@@ -92,26 +94,32 @@ function buildQuotes(
     return results;
 }
 
-const MOCK_BALANCE = 5000;
-
-const formSchema = z.object({
-    amount: validateAmount({
-        min: 1,
-        balance: MOCK_BALANCE,
-        maxDecimals: 6,
-        minMessage: "Minimum amount is 1 USDC",
-        balanceMessage: `Amount exceeds your balance of ${MOCK_BALANCE.toLocaleString()} USDC`
-    }),
-    accountNumber: validateBankAccount(),
-    bankCode: z.string({ message: "Please select a bank" }).min(1, "Please select a bank"),
-});
-
-type FormValues = z.infer<typeof formSchema>;
+type FormValues = {
+    amount: string;
+    accountNumber: string;
+    bankCode: string;
+};
 
 export default function OfframpPage() {
-    const { isConnected } = useWallet();
+    const { isConnected, address } = useWallet();
+    const { getAvailableBalance } = usePortfolio();
     const { addNotification } = useNotifications();
     const router = useRouter();
+
+    const [sendAsset, setSendAsset] = useState(SEND_ASSETS[0]);
+    const walletBalance = getAvailableBalance(sendAsset.symbol);
+
+    const formSchema = useMemo(() => z.object({
+        amount: validateAmount({
+            min: 1,
+            balance: walletBalance,
+            maxDecimals: 6,
+            minMessage: "Minimum amount is 1",
+            balanceMessage: `Amount exceeds your balance of ${walletBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${sendAsset.symbol}`
+        }),
+        accountNumber: validateBankAccount(),
+        bankCode: z.string({ message: "Please select a bank" }).min(1, "Please select a bank"),
+    }), [walletBalance, sendAsset.symbol]);
 
     const {
         handleSubmit,
@@ -120,6 +128,7 @@ export default function OfframpPage() {
         formState: { errors, isValid, isDirty },
         trigger,
     } = useForm<FormValues>({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resolver: zodResolver(formSchema as any),
         mode: "onBlur",
         defaultValues: {
@@ -133,7 +142,6 @@ export default function OfframpPage() {
     const accountNumber = watch("accountNumber");
     const selectedBankCode = watch("bankCode");
 
-    const [sendAsset, setSendAsset] = useState(SEND_ASSETS[0]);
     const [receiveCurrency, setReceiveCurrency] = useState(RECEIVE_CURRENCIES[0]);
     const selectedBank = BANKS.find(b => b.code === selectedBankCode) || null;
     const [showBankDropdown, setShowBankDropdown] = useState(false);
@@ -236,7 +244,7 @@ export default function OfframpPage() {
             : 0;
 
     const handleWithdraw = handleSubmit((data) => {
-        if (!isValid || quotePhase !== "done" || !selectedQuote) {
+        if (!isValid || quotePhase !== "done" || !selectedQuote || !address) {
             return;
         }
 
@@ -397,7 +405,7 @@ export default function OfframpPage() {
                                 <span></span>
                             )}
                             <div className="text-xs text-muted-foreground">
-                                Balance: {MOCK_BALANCE.toLocaleString()} {sendAsset.symbol}
+                                Balance: {walletBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} {sendAsset.symbol}
                             </div>
                         </div>
                     </div>
@@ -415,7 +423,7 @@ export default function OfframpPage() {
 
                     <div className="p-4 sm:p-5">
                         <label className="text-xs text-muted-foreground font-medium mb-2 block">
-                            You&apos;ll receive
+                            You&apos;ll receive <span className="font-normal opacity-60">(indicative — exact rate set at settlement)</span>
                         </label>
                         <div className="flex items-center gap-3">
                             <div className="flex-1 text-2xl sm:text-3xl font-heading font-light text-foreground min-w-0 truncate min-h-[44px] flex items-center">

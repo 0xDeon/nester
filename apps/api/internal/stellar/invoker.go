@@ -116,7 +116,10 @@ func (c *ContractInvoker) InvokeVoidFunction(ctx context.Context, contractAddres
 		V:           1,
 		SorobanData: &sorobanData,
 	}
-	minFee, _ := strconv.ParseInt(simResult.MinResourceFee, 10, 64)
+	minFee, err := strconv.ParseInt(simResult.MinResourceFee, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse simulation min resource fee %q: %w", simResult.MinResourceFee, err)
+	}
 	envelope.V1.Tx.Fee = xdr.Uint32(txnbuild.MinBaseFee + minFee)
 
 	// Re-parse from the patched XDR so txnbuild can sign it.
@@ -369,7 +372,10 @@ func (c *ContractInvoker) InvokeWithI128Pair(ctx context.Context, contractAddres
 		V:           1,
 		SorobanData: &sorobanData,
 	}
-	minFee, _ := strconv.ParseInt(simResult.MinResourceFee, 10, 64)
+	minFee, err := strconv.ParseInt(simResult.MinResourceFee, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse simulation min resource fee %q: %w", simResult.MinResourceFee, err)
+	}
 	envelope.V1.Tx.Fee = xdr.Uint32(txnbuild.MinBaseFee + minFee)
 
 	envB64, err := xdr.MarshalBase64(envelope)

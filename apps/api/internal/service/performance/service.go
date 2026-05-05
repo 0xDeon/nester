@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -152,6 +153,7 @@ type Tracker struct {
 	chain    BalanceProvider
 	interval time.Duration
 	clock    func() time.Time
+	logger   *slog.Logger
 }
 
 func NewTracker(
@@ -166,7 +168,14 @@ func NewTracker(
 		chain:    chain,
 		interval: interval,
 		clock:    func() time.Time { return time.Now().UTC() },
+		logger:   slog.Default(),
 	}
+}
+
+// WithLogger sets a custom logger on the tracker (for dependency injection / tests).
+func (t *Tracker) WithLogger(logger *slog.Logger) *Tracker {
+	t.logger = logger
+	return t
 }
 
 // SetClock is for tests.
@@ -185,8 +194,7 @@ func (t *Tracker) Run(ctx context.Context) error {
 
 	// Snapshot immediately so the API has data without waiting one full tick.
 	if err := t.TakeSnapshots(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		// Log-and-continue is the caller's job; we surface the error once and
-		// keep looping so a transient failure doesn't kill the worker.
+		t.logger.Error("performance: initial snapshot failed", "error", err)
 	}
 
 	for {
@@ -194,7 +202,9 @@ func (t *Tracker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			_ = t.TakeSnapshots(ctx)
+			if err := t.TakeSnapshots(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.logger.Error("performance: snapshot tick failed", "error", err)
+			}
 		}
 	}
 }

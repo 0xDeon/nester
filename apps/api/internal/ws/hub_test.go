@@ -21,7 +21,7 @@ func newTestHub() *Hub {
 			return "", os.ErrPermission
 		}
 		return "user-123", nil
-	})
+	}, []string{"http://localhost:3000"})
 }
 
 func TestHub_SubscriptionManagement(t *testing.T) {
