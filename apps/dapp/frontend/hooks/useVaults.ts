@@ -8,6 +8,9 @@ export interface Vault {
   minDeposit: number;
   apy?: number;
   tvl?: number;
+  asset: "USDC" | "XLM";
+  managementFeePct?: number;
+  performanceFeePct?: number;
 }
 
 export function formatTvl(value: number | undefined): string {
@@ -24,7 +27,11 @@ export function useVaults() {
     queryFn: async () => {
       const res = await fetch('/api/v1/vaults');
       if (!res.ok) throw new Error('Failed to fetch vaults');
-      return res.json() as Promise<Vault[]>;
+      const vaults = await res.json() as Vault[];
+      return vaults.map((v) => ({
+        ...v,
+        asset: (v.asset ?? (v.name.toLowerCase().includes("xlm") ? "XLM" : "USDC")) as "USDC" | "XLM",
+      }));
     },
     refetchInterval: 60000,
     staleTime: 30000,

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"time"
 
@@ -9,6 +10,11 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/suncrestlabs/nester/apps/api/internal/domain/offramp"
+)
+
+var (
+	renuban  = regexp.MustCompile(`^\d{10}$`)
+	rebankCode = regexp.MustCompile(`^\d{3,9}$`)
 )
 
 type SettlementService struct {
@@ -158,8 +164,16 @@ func validateDestination(d offramp.Destination) error {
 		strings.TrimSpace(d.AccountName) == "" {
 		return offramp.ErrInvalidSettlement
 	}
-	if d.Type == "bank_transfer" && strings.TrimSpace(d.BankCode) == "" {
+	if !renuban.MatchString(d.AccountNumber) {
 		return offramp.ErrInvalidSettlement
+	}
+	if d.Type == "bank_transfer" {
+		if strings.TrimSpace(d.BankCode) == "" {
+			return offramp.ErrInvalidSettlement
+		}
+		if !rebankCode.MatchString(d.BankCode) {
+			return offramp.ErrInvalidSettlement
+		}
 	}
 	return nil
 }

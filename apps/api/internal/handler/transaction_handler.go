@@ -53,6 +53,16 @@ func (h *TransactionHandler) createTransaction(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	validTypes := map[string]bool{
+		string(transaction.TypeDeposit):    true,
+		string(transaction.TypeWithdrawal): true,
+		string(transaction.TypeSettlement): true,
+	}
+	if !validTypes[req.Type] {
+		response.WriteJSON(w, http.StatusBadRequest, response.ValidationErr("type must be one of: deposit, withdrawal, settlement"))
+		return
+	}
+
 	model, err := h.service.RegisterTransaction(r.Context(), service.RegisterTransactionInput{
 		VaultID:  vaultID,
 		Type:     transaction.TransactionType(req.Type),

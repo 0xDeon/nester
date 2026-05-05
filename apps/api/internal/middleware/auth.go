@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -109,7 +109,15 @@ func matchRule(rules []RouteRule, r *http.Request) *RouteRule {
 // writeMiddlewareError writes a JSON error envelope consistent with the rest
 // of the API error format.
 func writeMiddlewareError(w http.ResponseWriter, status int, msg string) {
+	type errBody struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	type envelope struct {
+		Success bool    `json:"success"`
+		Error   errBody `json:"error"`
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"success":false,"error":{"code":%d,"message":%q}}`, status, msg) // #nosec G705 -- JSON API, Content-Type is application/json, no HTML context
+	_ = json.NewEncoder(w).Encode(envelope{Success: false, Error: errBody{Code: status, Message: msg}})
 }

@@ -62,6 +62,12 @@ func (h *VaultHandler) createVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	request.ContractAddress = strings.TrimSpace(request.ContractAddress)
+	if !isValidSorobanContractAddress(request.ContractAddress) {
+		response.WriteJSON(w, http.StatusBadRequest, response.ValidationErr("contract_address must be a 56-character Soroban address starting with 'C'"))
+		return
+	}
+
 	model, err := h.service.CreateVault(r.Context(), service.CreateVaultInput{
 		UserID:          userID,
 		ContractAddress: request.ContractAddress,
@@ -173,6 +179,20 @@ func validateCurrencyCode(code string) error {
 		return errors.New("currency code must contain only letters")
 	}
 	return nil
+}
+
+// isValidSorobanContractAddress validates a Stellar Soroban contract address:
+// 56 characters long, starts with 'C', uppercase base32 alphanumeric.
+func isValidSorobanContractAddress(addr string) bool {
+	if len(addr) != 56 || addr[0] != 'C' {
+		return false
+	}
+	for _, ch := range addr {
+		if !((ch >= 'A' && ch <= 'Z') || (ch >= '2' && ch <= '7')) {
+			return false
+		}
+	}
+	return true
 }
 
 // isAlpha returns true if all characters in the string are alphabetic

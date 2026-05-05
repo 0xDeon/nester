@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import Link from 'next/link';
 import { useSettings } from "@/context/settings-context";
+import { getExplorerTxUrl } from "@/utils/explorer";
 
 interface RecentActivityProps {
     transactions: Transaction[];
@@ -91,9 +92,9 @@ export function RecentActivity({ transactions }: RecentActivityProps) {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <a 
-                                                href={`https://stellar.expert/explorer/public/tx/${tx.txHash}`} 
-                                                target="_blank" 
+                                            <a
+                                                href={getExplorerTxUrl(tx.txHash)}
+                                                target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-all group/link font-mono"
                                             >

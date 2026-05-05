@@ -10,6 +10,23 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
+	if len(allowedOrigins) == 0 {
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// Same-origin requests carry no Origin header — allow them.
+		return true
+	}
+	for _, allowed := range allowedOrigins {
+		if origin == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	maxEventHistory = 50 // Buffer last N events per channel
 )
@@ -21,24 +38,33 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	history    map[string][]Event
-	
+
 	// Optional authenticator callback to validate tokens
-	authenticator func(token string) (userID string, err error)
-	logger        *slog.Logger
-	mu            sync.RWMutex
+	authenticator  func(token string) (userID string, err error)
+	allowedOrigins []string
+	logger         *slog.Logger
+	upgrader       websocket.Upgrader
+	mu             sync.RWMutex
 }
 
-func NewHub(logger *slog.Logger, authFunc func(string) (string, error)) *Hub {
-	return &Hub{
-		clients:       make(map[*Client]bool),
-		channels:      make(map[string]map[*Client]bool),
-		broadcast:     make(chan Event, 1000), // Buffer to avoid blocking producers
-		register:      make(chan *Client),
-		unregister:    make(chan *Client),
-		history:       make(map[string][]Event),
-		authenticator: authFunc,
-		logger:        logger,
+func NewHub(logger *slog.Logger, authFunc func(string) (string, error), allowedOrigins []string) *Hub {
+	h := &Hub{
+		clients:        make(map[*Client]bool),
+		channels:       make(map[string]map[*Client]bool),
+		broadcast:      make(chan Event, 1000), // Buffer to avoid blocking producers
+		register:       make(chan *Client),
+		unregister:     make(chan *Client),
+		history:        make(map[string][]Event),
+		authenticator:  authFunc,
+		allowedOrigins: allowedOrigins,
+		logger:         logger,
 	}
+	h.upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     func(r *http.Request) bool { return isOriginAllowed(r, h.allowedOrigins) },
+	}
+	return h
 }
 
 func (h *Hub) Run(ctx context.Context) {
@@ -142,33 +168,25 @@ func (h *Hub) removeClient(client *Client) {
 func (h *Hub) removeClientLocked(client *Client) {
 	if _, ok := h.clients[client]; ok {
 		delete(h.clients, client)
-		// Remove from all channels
-		client.mu.Lock()
-		for ch := range client.subs {
-			if subs, ok := h.channels[ch]; ok {
+		// Remove from all channels using h.channels (already under h.mu),
+		// avoiding acquiring client.mu which would invert the lock order.
+		for ch, subs := range h.channels {
+			if _, in := subs[client]; in {
 				delete(subs, client)
 				if len(subs) == 0 {
 					delete(h.channels, ch)
 				}
 			}
 		}
-		client.mu.Unlock()
 		close(client.send)
 	}
-}
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	// Allowing all origins for ease, should be constrained in production
-	CheckOrigin: func(r *http.Request) bool { return true }, 
 }
 
 func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	var userID string
 	var err error
-	
+
 	if h.authenticator != nil {
 		userID, err = h.authenticator(token)
 		if err != nil {
@@ -178,7 +196,7 @@ func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("websocket upgrade failed", "error", err)
 		return

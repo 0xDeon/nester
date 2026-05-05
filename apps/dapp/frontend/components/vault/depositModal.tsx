@@ -148,9 +148,9 @@ function getVaultMeta(vault: VaultDefinition) {
     apy: (vault.apy || 0) / 100,
     apyLabel: vault.apy !== undefined ? `${vault.apy.toFixed(1)}%` : "TBD",
     lockDays: 0,
-    managementFeePct: 0.5,
-    performanceFeePct: 10,
-    asset: "USDC" as "USDC",
+    managementFeePct: vault.managementFeePct ?? 0.5,
+    performanceFeePct: vault.performanceFeePct ?? 10,
+    asset: vault.asset,
   };
 }
 
@@ -178,10 +178,10 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
   const [state, setState] = useState<ActionState>("input");
   const [errorMsg, setErrorMsg] = useState("");
   const [receipt, setReceipt] = useState<TransactionReceipt | null>(null);
-  const [selectedAsset, setSelectedAsset] = useState<"USDC" | "XLM">("USDC");
+  const [selectedAsset, setSelectedAsset] = useState<"USDC" | "XLM">(vault?.asset ?? "USDC");
 
-  // Keep selectedAsset and strategy in sync when vault changes
-  const supportedAssets = ["USDC"] as ("USDC" | "XLM")[];
+  // Keep selectedAsset in sync when vault changes
+  const supportedAssets = [vault?.asset ?? "USDC"] as ("USDC" | "XLM")[];
 
   const amount = Number(amountInput) || 0;
   const meta = vault ? getVaultMeta(vault) : null;
@@ -219,6 +219,9 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
 
     try {
       setState("building");
+      // Re-check wallet address at signing time — wallet may have disconnected
+      if (!address) throw new Error("Wallet disconnected. Please reconnect and try again.");
+
       const txReceipt = await executeVaultDeposit({
         walletAddress: address,
         vaultId: vault.id,

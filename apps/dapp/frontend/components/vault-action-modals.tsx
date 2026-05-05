@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -19,6 +19,8 @@ import {
     X,
 } from "lucide-react";
 
+import { useEffect } from "react";
+
 import {
     usePortfolio,
     type PortfolioPosition,
@@ -30,6 +32,9 @@ import { useWallet } from "@/components/wallet-provider";
 import { executeVaultDeposit, executeVaultWithdraw } from "@/lib/stellar/transaction";
 
 import { useNetwork } from "@/hooks/useNetwork";
+
+const LARGE_DEPOSIT_THRESHOLD = 10_000;
+const STELLAR_BASE_FEE_XLM = 0.00001;
 
 type ActionState = "input" | "confirming" | "submitting" | "success" | "error";
 
@@ -138,21 +143,29 @@ export function DepositModal({
         walletPopupUsed: boolean;
     } | null>(null);
 
-    const [selectedAsset, setSelectedAsset] = useState<"USDC" | "XLM">("USDC");
+    const vaultAsset = vault?.asset ?? "USDC";
+    const [selectedAsset, setSelectedAsset] = useState<"USDC" | "XLM">(vaultAsset);
 
-    // Reset selected asset when vault changes
-    const assets = ["USDC"] as ("USDC" | "XLM")[];
+    // Keep selectedAsset in sync when the vault prop changes
+    useEffect(() => {
+        setSelectedAsset(vault?.asset ?? "USDC");
+    }, [vault?.asset]);
+
+    const assets = [vaultAsset] as ("USDC" | "XLM")[];
     const balance = getAvailableBalance(selectedAsset);
 
+    const minDeposit = vault?.minDeposit ?? 0.000001;
     const formSchema = useMemo(() => z.object({
         amount: validateAmount({
-            min: 0.000001,
+            min: minDeposit,
             balance: balance,
             maxDecimals: 6,
-            minMessage: "Amount must be greater than 0",
-            balanceMessage: `Amount exceeds your balance of ${formatCurrency(balance)} USDC`
+            minMessage: minDeposit > 0.000001
+                ? `Minimum deposit is ${formatCurrency(minDeposit)} ${selectedAsset}`
+                : "Amount must be greater than 0",
+            balanceMessage: `Amount exceeds your balance of ${formatCurrency(balance)} ${selectedAsset}`
         })
-    }), [balance]);
+    }), [balance, minDeposit, selectedAsset]);
 
     type FormValues = z.infer<typeof formSchema>;
 
@@ -195,6 +208,9 @@ export function DepositModal({
         setShowLargeWarning(false);
 
         try {
+            // Re-check wallet address at signing time — wallet may have disconnected
+            if (!address) throw new Error("Wallet disconnected. Please reconnect and try again.");
+
             const submission = await executeVaultDeposit({
                 walletAddress: address,
                 vaultId: vault.id,
@@ -223,7 +239,7 @@ export function DepositModal({
     };
 
     const handleDeposit = handleSubmit(() => {
-        if (amount > 10000 && !showLargeWarning) {
+        if (amount > LARGE_DEPOSIT_THRESHOLD && !showLargeWarning) {
             setShowLargeWarning(true);
             return;
         }
@@ -353,7 +369,7 @@ export function DepositModal({
                                                     <span></span>
                                                 )}
                                                 <p className="text-xs text-muted-foreground">
-                                                    Available from connected wallet: {formatCurrency(balance)} USDC
+                                                    Available from connected wallet: {formatCurrency(balance)} {selectedAsset}
                                                 </p>
                                             </div>
                                         </>
@@ -365,7 +381,7 @@ export function DepositModal({
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Estimated annual yield</span>
                                     <span className="font-medium text-foreground">
-                                        {formatCurrency(estimatedYield)} USDC
+                                        {formatCurrency(estimatedYield)} {selectedAsset}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
@@ -383,20 +399,20 @@ export function DepositModal({
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Management fee (annual)</span>
                                     <span className="font-medium text-foreground">
-                                        0.5%
+                                        {(vault.managementFeePct ?? 0.5).toFixed(1)}%
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Performance fee (on yield)</span>
                                     <span className="font-medium text-foreground">
-                                        10%
+                                        {(vault.performanceFeePct ?? 10).toFixed(0)}%
                                     </span>
                                 </div>
                                 {currentNetwork.id === 'mainnet' && (
                                     <div className="flex items-center justify-between text-sm">
                                         <span className="text-muted-foreground">Estimated Network Fee</span>
                                         <span className="font-medium text-foreground">
-                                            ~0.00001 XLM
+                                            ~{STELLAR_BASE_FEE_XLM} XLM
                                         </span>
                                     </div>
                                 )}
@@ -458,7 +474,7 @@ export function DepositModal({
                                         </p>
                                     </div>
                                     <p className="mt-2 text-sm text-emerald-800/80">
-                                        {formatCurrency(amount)} USDC was deposited into the {vault.name} vault.
+                                        {formatCurrency(amount)} {selectedAsset} was deposited into the {vault.name} vault.
                                     </p>
                                     <div className="mt-4 flex flex-wrap gap-2">
                                         <Link
@@ -634,6 +650,9 @@ export function WithdrawModal({
         setShowLargeWarning(false);
 
         try {
+            // Re-check wallet address at signing time — wallet may have disconnected
+            if (!address) throw new Error("Wallet disconnected. Please reconnect and try again.");
+
             const submission = await executeVaultWithdraw({
                 walletAddress: address,
                 vaultId: position.vaultId,
@@ -668,7 +687,7 @@ export function WithdrawModal({
     };
 
     const handleWithdraw = handleSubmit(() => {
-        if (amount > 10000 && !showLargeWarning) {
+        if (amount > LARGE_DEPOSIT_THRESHOLD && !showLargeWarning) {
             setShowLargeWarning(true);
             return;
         }
@@ -1125,46 +1144,14 @@ export function TransferModal({
                                 </div>
                             </div>
 
-                            <div className="mt-4 rounded-2xl border border-border bg-secondary/20 p-4 text-sm text-muted-foreground">
+                            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                                 <div className="flex items-start gap-3">
-                                    <Sparkles className="mt-0.5 h-4 w-4 text-foreground/70" />
+                                    <Sparkles className="mt-0.5 h-4 w-4 text-amber-600" />
                                     <p>
-                                        Funds move directly between vaults. No early-exit penalty applies, and a new lock period starts in the destination vault.
+                                        Vault-to-vault transfers are coming soon. You can withdraw from this vault and deposit into another in the meantime.
                                     </p>
                                 </div>
                             </div>
-
-                            {state === "success" && receipt ? (
-                                <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                                    <div className="flex items-center gap-2 text-emerald-700">
-                                        <CheckCircle2 className="h-4 w-4" />
-                                        <p className="text-sm font-medium">Transfer confirmed</p>
-                                    </div>
-                                    <p className="mt-2 text-sm text-emerald-800/80">
-                                        {formatCurrency(receipt.amount)} {position.asset} moved to <strong>{receipt.toVaultName}</strong>.
-                                    </p>
-                                    <div className="mt-4 flex flex-wrap gap-2">
-                                        <Link
-                                            href={receipt.explorerUrl}
-                                            target="_blank"
-                                            className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-2 text-xs font-medium text-foreground shadow-sm"
-                                        >
-                                            View on Explorer
-                                            <ExternalLink className="h-3.5 w-3.5" />
-                                        </Link>
-                                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white px-3 py-2 text-xs text-emerald-700">
-                                            {receipt.walletPopupUsed ? "Wallet signature captured" : "Mock signature used"}
-                                        </span>
-                                    </div>
-                                </div>
-                            ) : error ? (
-                                <div className="mt-5 rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
-                                    <div className="flex items-start gap-2">
-                                        <AlertCircle className="mt-0.5 h-4 w-4" />
-                                        <span>{error}</span>
-                                    </div>
-                                </div>
-                            ) : null}
 
                             <div className="mt-5 flex gap-3">
                                 <button
@@ -1172,29 +1159,8 @@ export function TransferModal({
                                     onClick={reset}
                                     className="flex-1 min-h-[var(--touch-target)] rounded-full border border-border bg-white px-5 text-sm font-medium text-foreground transition-colors hover:border-black/15 active:bg-secondary"
                                 >
-                                    {state === "success" ? "Close" : "Cancel"}
+                                    Close
                                 </button>
-                                {state !== "success" && (
-                                    <button
-                                        onClick={handleTransfer}
-                                        disabled={!canSubmit || state === "confirming" || state === "submitting"}
-                                        className="flex-1 min-h-[var(--touch-target)] rounded-full bg-brand-dark px-5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]"
-                                    >
-                                        {state === "confirming" && (
-                                            <span className="inline-flex items-center gap-2">
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                Awaiting Signature
-                                            </span>
-                                        )}
-                                        {state === "submitting" && (
-                                            <span className="inline-flex items-center gap-2">
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                Submitting
-                                            </span>
-                                        )}
-                                        {(state === "input" || state === "error") && "Confirm Transfer"}
-                                    </button>
-                                )}
                             </div>
                         </div>
                     </div>

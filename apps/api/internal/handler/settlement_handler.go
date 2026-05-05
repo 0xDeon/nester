@@ -187,10 +187,16 @@ func (h *SettlementHandler) updateStatus(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	newStatus, err := offramp.ParseStatus(req.Status)
+	if err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, response.ValidationErr("status: "+err.Error()))
+		return
+	}
+
 	model, err := h.service.UpdateStatus(r.Context(), service.UpdateStatusInput{
 		SettlementID: id,
 		CallerID:     callerID,
-		NewStatus:    offramp.SettlementStatus(req.Status),
+		NewStatus:    newStatus,
 	})
 	if err != nil {
 		h.writeDomainError(w, r, err)
