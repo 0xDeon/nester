@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -92,18 +90,6 @@ func applySavingsScheduleMigrations(t *testing.T, db *sql.DB) {
 	// The base helper now applies the complete migration chain, so the
 	// per-feature additions this function used to layer on are covered.
 	applyIntegrationMigrations(t, db)
-}
-
-func applyMigrationFile(t *testing.T, db *sql.DB, name string) {
-	t.Helper()
-	path := filepath.Join("..", "..", "..", "migrations", name)
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile(%q) error = %v", path, err)
-	}
-	if _, err := db.Exec(string(contents)); err != nil {
-		t.Fatalf("applying migration %q failed: %v", name, err)
-	}
 }
 
 func seedIntegrationSavingsGoal(t *testing.T, db *sql.DB, userID uuid.UUID) uuid.UUID {

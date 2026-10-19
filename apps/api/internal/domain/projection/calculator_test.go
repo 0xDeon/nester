@@ -18,7 +18,7 @@ func (c *TestCalculator) Calculate(input ProjectionInput) []ProjectionPoint {
 	annualRate := input.APY
 
 	// Monthly compound rate calculation
-	monthlyRate := decimal.Zero
+	var monthlyRate decimal.Decimal
 	if input.CompoundFrequency == CompoundDaily {
 		// For daily compounding: use simple approximation
 		monthlyRate = annualRate.Div(decimal.NewFromInt(12)).Mul(decimal.NewFromFloat(1.05)) // Slightly higher for daily

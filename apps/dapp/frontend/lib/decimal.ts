@@ -336,3 +336,54 @@ export function selectSourceVault<T extends VaultBalanceLike>(
   );
   return pickLargestBalanceVault(qualifying);
 }
+
+// ─── Deposit amount conversion ──────────────────────────────────────────────
+
+const STROOP_DECIMALS = 7;
+const DIGITS = /^\d*$/;
+
+/**
+ * Convert a decimal string to integer stroops (7 decimals) using string
+ * arithmetic only. No floating-point value is ever produced, so the stroops
+ * signed always equal the amount shown.
+ *
+ * @throws if the string is not a plain non-negative decimal or has more than
+ * 7 fractional digits.
+ */
+export function decimalStringToStroops(value: string): bigint {
+  const parts = value.split(".");
+  const [whole = "", fraction = ""] = parts;
+  if (
+    parts.length > 2 ||
+    !DIGITS.test(whole) ||
+    !DIGITS.test(fraction) ||
+    (whole === "" && fraction === "")
+  ) {
+    throw new Error(`Invalid amount "${value}": expected a plain decimal number`);
+  }
+  if (fraction.length > STROOP_DECIMALS) {
+    throw new Error(
+      `Invalid amount "${value}": at most ${STROOP_DECIMALS} decimal places are allowed`
+    );
+  }
+  return BigInt((whole || "0") + fraction.padEnd(STROOP_DECIMALS, "0"));
+}
+
+/**
+ * Resolve a deposit amount to positive stroops. Accepts only bigint stroops
+ * or a decimal string; a number is rejected because float * 1e7 misrounds.
+ */
+export function depositAmountToStroops(amount: bigint | string): bigint {
+  let stroops: bigint;
+  if (typeof amount === "bigint") {
+    stroops = amount;
+  } else if (typeof amount === "string") {
+    stroops = decimalStringToStroops(amount);
+  } else {
+    throw new TypeError("Deposit amount must be a bigint or a decimal string");
+  }
+  if (stroops <= BigInt(0)) {
+    throw new Error("Deposit amount must be greater than zero");
+  }
+  return stroops;
+}

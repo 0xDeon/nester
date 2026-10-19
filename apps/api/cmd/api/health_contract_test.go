@@ -38,7 +38,7 @@ const (
 	detailedPath = "/health/detailed"
 )
 
-// leakyDBError and leakyRedisError mimic what the drivers actually return when
+// errLeakyDB and errLeakyRedis mimic what the drivers actually return when
 // they cannot dial: pgx puts the DSN's user, host, password, and database name
 // into the error string, and go-redis puts the resolved address into its own.
 // If a handler ever echoes a driver error verbatim, these are the tokens that
@@ -49,9 +49,9 @@ const (
 // internal/config/redact_test.go): they are not credentials and grant access
 // to nothing, and the prefix says so at a glance in a leak report.
 var (
-	leakyDBError = errors.New("failed to connect to `host=postgres.internal.nester.svc " +
+	errLeakyDB = errors.New("failed to connect to `host=postgres.internal.nester.svc " +
 		"user=nester password=SENTINEL-fake-db-password database=nester_prod`: dial error")
-	leakyRedisError = errors.New("dial tcp redis.internal.nester.svc:6379: connect: connection refused")
+	errLeakyRedis = errors.New("dial tcp redis.internal.nester.svc:6379: connect: connection refused")
 )
 
 // upstreamLeakBody is what a failing Horizon / Soroban RPC node returns. The
@@ -131,7 +131,7 @@ func TestHealthEndpointContract(t *testing.T) {
 			// Liveness follows the drain flag only. A dead database must not
 			// make an orchestrator restart an otherwise-live process.
 			name: "healthz reports draining after shutdown starts", path: "/healthz",
-			dbErr: leakyDBError, redisErr: leakyRedisError,
+			dbErr: errLeakyDB, redisErr: errLeakyRedis,
 			wantCode: http.StatusServiceUnavailable, wantContentType: livenessContentType, wantBody: "draining",
 		},
 		{
@@ -140,7 +140,7 @@ func TestHealthEndpointContract(t *testing.T) {
 		},
 		{
 			name: "healthz stays ok while dependencies are down", path: "/healthz",
-			ready: true, dbErr: leakyDBError, redisErr: leakyRedisError,
+			ready: true, dbErr: errLeakyDB, redisErr: errLeakyRedis,
 			wantCode: http.StatusOK, wantContentType: livenessContentType, wantBody: "ok",
 		},
 
@@ -156,7 +156,7 @@ func TestHealthEndpointContract(t *testing.T) {
 		},
 		{
 			name: "readyz fails when the database is unavailable", path: "/readyz",
-			ready: true, dbErr: leakyDBError,
+			ready: true, dbErr: errLeakyDB,
 			wantCode: http.StatusServiceUnavailable, wantContentType: livenessContentType,
 			wantBody: "database unavailable",
 		},
@@ -170,7 +170,7 @@ func TestHealthEndpointContract(t *testing.T) {
 		},
 		{
 			name: "readyz fails when redis is unavailable", path: "/readyz",
-			ready: true, redisErr: leakyRedisError, horizonHealthy: true, sorobanHealthy: true,
+			ready: true, redisErr: errLeakyRedis, horizonHealthy: true, sorobanHealthy: true,
 			wantCode: http.StatusServiceUnavailable, wantContentType: livenessContentType,
 			wantBody: "redis unavailable",
 		},
@@ -212,7 +212,7 @@ func TestHealthEndpointContract(t *testing.T) {
 			// when the indexer is also stale — the first hard failure wins
 			// rather than staleness masking it.
 			name: "readyz reports the database over a stale indexer", path: "/readyz",
-			ready: true, dbErr: leakyDBError, horizonHealthy: true, sorobanHealthy: true, indexerStale: true,
+			ready: true, dbErr: errLeakyDB, horizonHealthy: true, sorobanHealthy: true, indexerStale: true,
 			wantCode: http.StatusServiceUnavailable, wantContentType: livenessContentType,
 			wantBody: "database unavailable",
 		},
@@ -239,7 +239,7 @@ func TestHealthEndpointContract(t *testing.T) {
 		},
 		{
 			name: "detailed reports the database as down", path: detailedPath,
-			ready: true, dbErr: leakyDBError, horizonHealthy: true, sorobanHealthy: true,
+			ready: true, dbErr: errLeakyDB, horizonHealthy: true, sorobanHealthy: true,
 			wantCode: http.StatusServiceUnavailable, wantContentType: detailedContentType,
 			wantStatusField: "degraded",
 			wantDatabaseOK:  false, wantDatabaseError: "unavailable",
@@ -257,7 +257,7 @@ func TestHealthEndpointContract(t *testing.T) {
 		},
 		{
 			name: "detailed reports redis as down", path: detailedPath,
-			ready: true, redisErr: leakyRedisError, horizonHealthy: true, sorobanHealthy: true,
+			ready: true, redisErr: errLeakyRedis, horizonHealthy: true, sorobanHealthy: true,
 			wantCode: http.StatusServiceUnavailable, wantContentType: detailedContentType,
 			wantStatusField: "degraded",
 			wantDatabaseOK:  true,

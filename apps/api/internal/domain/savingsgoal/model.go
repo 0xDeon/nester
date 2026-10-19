@@ -162,8 +162,7 @@ func ValidateEmoji(s string) error {
 	if s == "" {
 		return nil
 	}
-	runes := []rune(s)
-	for _, r := range runes {
+	for _, r := range s {
 		if !unicode.Is(unicode.So, r) && !unicode.Is(unicode.Sm, r) &&
 			!unicode.Is(unicode.Sk, r) && !isEmojiRange(r) {
 			return fmt.Errorf("%w: emoji must contain only emoji characters", ErrInvalidGoal)

@@ -346,24 +346,6 @@ func (q *memQueue) finish(status jobqueue.Status) int {
 	return n
 }
 
-// finishType drives every live job of one type to status.
-func (q *memQueue) finishType(jobType string, status jobqueue.Status) int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	n := 0
-	for _, id := range q.order {
-		job := q.jobs[id]
-		if job.Type != jobType {
-			continue
-		}
-		if job.Status == jobqueue.StatusPending || job.Status == jobqueue.StatusRunning {
-			job.Status = status
-			n++
-		}
-	}
-	return n
-}
-
 // payloads returns every enqueued payload, in enqueue order.
 func (q *memQueue) payloads() []string {
 	q.mu.Lock()

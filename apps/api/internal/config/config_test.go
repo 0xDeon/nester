@@ -25,7 +25,7 @@ func baseEnv(t *testing.T) {
 		"RATELIMIT_TRUSTED_PROXY_COUNT",
 		"LOG_LEVEL", "LOG_FORMAT",
 		"ALLOWED_ORIGINS",
-		"RUN_MIGRATIONS", "MIGRATIONS_DIR", "STARTUP_DEPENDENCY_TIMEOUT",
+		"RUN_MIGRATIONS", "ALLOW_MAINNET_AUTO_MIGRATE", "MIGRATIONS_DIR", "STARTUP_DEPENDENCY_TIMEOUT",
 		"METRICS_ENABLED", "METRICS_ADDR",
 	} {
 		t.Setenv(key, "")
@@ -1230,6 +1230,54 @@ func TestLoadRunMigrationsFlag(t *testing.T) {
 			}
 			if got := cfg.Startup().EnableAutoMigrate(); got != tc.wantEnable {
 				t.Fatalf("EnableAutoMigrate() = %v, want %v", got, tc.wantEnable)
+			}
+		})
+	}
+}
+
+// TestLoadMainnetAutoMigrateGuard verifies mainnet refuses RUN_MIGRATIONS=true
+// unless ALLOW_MAINNET_AUTO_MIGRATE=true is also set.
+func TestLoadMainnetAutoMigrateGuard(t *testing.T) {
+	cases := []struct {
+		name        string
+		passphrase  string
+		rpcURL      string
+		runMigr     string
+		allowMainnt string
+		wantErr     bool
+	}{
+		{"mainnet with auto-migrate errors", StellarMainnetPassphrase, "https://soroban.example.com", "true", "", true},
+		{"mainnet with auto-migrate and explicit override ok", StellarMainnetPassphrase, "https://soroban.example.com", "true", "true", false},
+		{"mainnet with auto-migrate and override false errors", StellarMainnetPassphrase, "https://soroban.example.com", "true", "false", true},
+		{"mainnet without auto-migrate ok", StellarMainnetPassphrase, "https://soroban.example.com", "false", "", false},
+		{"testnet with auto-migrate ok", StellarTestnetPassphrase, "https://soroban-testnet.stellar.org", "true", "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			baseEnv(t)
+			requiredEnv(t)
+			t.Setenv("STELLAR_NETWORK_PASSPHRASE", tc.passphrase)
+			t.Setenv("STELLAR_RPC_URL", tc.rpcURL)
+			t.Setenv("STELLAR_HORIZON_URL", "https://horizon.example.com")
+			t.Setenv("YIELD_REGISTRY_CONTRACT", "CAAAA")
+			t.Setenv("STELLAR_ALLOCATION_STRATEGY_ADDRESS", "CBBBB")
+			t.Setenv("RUN_MIGRATIONS", tc.runMigr)
+			t.Setenv("ALLOW_MAINNET_AUTO_MIGRATE", tc.allowMainnt)
+			chdir(t, t.TempDir())
+
+			_, err := Load()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected Load() to reject mainnet auto-migrate")
+				}
+				if !strings.Contains(err.Error(), "ALLOW_MAINNET_AUTO_MIGRATE") {
+					t.Fatalf("expected error to mention ALLOW_MAINNET_AUTO_MIGRATE, got: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
 			}
 		})
 	}

@@ -106,7 +106,7 @@ func NewVersionedAPI(defaultVersion string, usage UsageRecorder) *VersionedAPI {
 // mounting routes for that version.
 func (v *VersionedAPI) Register(state VersionState) error {
 	if state.Name == "" || !strings.HasPrefix(state.Name, "v") {
-		return fmt.Errorf("server: version name %q must look like v1, v2, ...", state.Name)
+		return fmt.Errorf("server: version name %q must look like v1 or v2", state.Name)
 	}
 	if state.Retired && state.Successor == "" {
 		return fmt.Errorf("server: retired version %q must name a successor", state.Name)

@@ -245,8 +245,11 @@ type ReconciliationConfig struct {
 // accepting traffic (migrations, dependency reachability checks).
 type StartupConfig struct {
 	enableAutoMigrate bool
-	migrationsDir     string
-	dependencyTimeout time.Duration
+	// allowMainnetAutoMigrate is the explicit operator override that permits
+	// enableAutoMigrate when connected to mainnet.
+	allowMainnetAutoMigrate bool
+	migrationsDir           string
+	dependencyTimeout       time.Duration
 }
 
 type PerformanceConfig struct {
@@ -564,9 +567,10 @@ func Load() (*Config, error) {
 			broadcastThresholdBPS: loader.intDefault("APY_BROADCAST_THRESHOLD", 50),
 		},
 		startup: StartupConfig{
-			enableAutoMigrate: loader.boolDefault("RUN_MIGRATIONS", false),
-			migrationsDir:     loader.stringDefault("MIGRATIONS_DIR", "./migrations"),
-			dependencyTimeout: loader.durationDefault("STARTUP_DEPENDENCY_TIMEOUT", 5*time.Second),
+			enableAutoMigrate:       loader.boolDefault("RUN_MIGRATIONS", false),
+			allowMainnetAutoMigrate: loader.boolDefault("ALLOW_MAINNET_AUTO_MIGRATE", false),
+			migrationsDir:           loader.stringDefault("MIGRATIONS_DIR", "./migrations"),
+			dependencyTimeout:       loader.durationDefault("STARTUP_DEPENDENCY_TIMEOUT", 5*time.Second),
 		},
 		bankAccountCipherKey: loader.stringDefault("BANK_ACCOUNT_ENCRYPTION_KEY", ""),
 		transactionPoller: TransactionPollerConfig{
@@ -1237,6 +1241,13 @@ func (c *Config) validate(loader *envLoader) {
 
 	if strings.TrimSpace(c.startup.migrationsDir) == "" {
 		loader.addError("MIGRATIONS_DIR must not be empty")
+	}
+
+	if strings.TrimSpace(c.stellar.networkPassphrase) == StellarMainnetPassphrase && c.startup.enableAutoMigrate && !c.startup.allowMainnetAutoMigrate {
+		loader.addError(
+			"RUN_MIGRATIONS=true is refused on mainnet: run migrations as a separate reviewed pipeline step " +
+				"after a backup, or set ALLOW_MAINNET_AUTO_MIGRATE=true to override explicitly",
+		)
 	}
 
 	// Upper bound as well as lower: poolSize is an int parsed from the

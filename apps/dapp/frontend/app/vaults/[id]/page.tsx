@@ -21,6 +21,7 @@ import { HarvestModal } from "@/components/vault/HarvestModal";
 import { useBlendApy } from "@/hooks/useBlendApy";
 import { cn } from "@/lib/utils";
 import { RiskGauge } from "@/components/vaults/risk-gauge";
+import { ContractsSection } from "@/components/contracts-section";
 
 const MARKET_LABELS: Record<MarketType, string> = {
     single: "Single Token Market",
@@ -349,6 +350,8 @@ export default function VaultDetailPage() {
                  >
                      <RiskGauge vaultId={id as string} />
                  </motion.div>
+
+                 <ContractsSection />
              </AppShell>
 
         <DepositModal

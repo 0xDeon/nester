@@ -317,7 +317,7 @@ func (s *APYService) GetHistory(ctx context.Context, slug string) (*APYHistoryRe
 		liveN++
 	}
 
-	avgAPY := decimal.Zero
+	var avgAPY decimal.Decimal
 	if liveN > 0 {
 		avgAPY = sumAPY.Div(decimal.NewFromInt(liveN))
 	} else {

@@ -270,6 +270,7 @@ func (b *Breaker) Allow() (Permit, error) {
 	return permit, err
 }
 
+//lint:ignore ST1008 unexported helper; error stays beside Permit to mirror Allow and keep the transition out of the public result
 func (b *Breaker) allowLocked() (Permit, error, *transition) {
 	now := b.now()
 	b.advanceLocked(now)

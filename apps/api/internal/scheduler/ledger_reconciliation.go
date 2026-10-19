@@ -145,15 +145,11 @@ func (j *LedgerReconciliationJob) reconcileVault(ctx context.Context, v Reconcil
 		return
 	}
 
-	diff := ledgerPoolBal - onChainBal
 	tolerance := j.cfg.ToleranceStroops
 	if tolerance <= 0 {
 		tolerance = 1_000_000 // default 0.1 USDC = 1e6 stroops
 	}
 	status := "ok"
-	if diff < 0 {
-		diff = -diff
-	}
 	// absolute difference
 	absDiff := ledgerPoolBal - onChainBal
 	if absDiff < 0 {

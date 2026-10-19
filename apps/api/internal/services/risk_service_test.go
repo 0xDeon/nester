@@ -79,7 +79,6 @@ func (s *stubVaultRepository) ListVaults(_ context.Context, _ vault.ListFilter) 
 type stubVaultRepositoryWithCount struct {
 	vault      vault.Vault
 	err        error
-	callCount  int
 	getVaultFn func(context.Context, uuid.UUID) (vault.Vault, error)
 }
 
