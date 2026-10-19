@@ -197,13 +197,6 @@ func (r *UserRepository) GetRoles(ctx context.Context, id uuid.UUID) ([]string, 
 	return roles, rows.Err()
 }
 
-func nullOptionalBytes(b []byte) any {
-	if b == nil {
-		return nil
-	}
-	return b
-}
-
 func mapUserError(err error) error {
 	if err == nil {
 		return nil

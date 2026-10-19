@@ -12,6 +12,7 @@ import {
 import { NETWORKS, DEFAULT_NETWORK } from "@/lib/networks";
 import { readNetworkId } from "@/lib/storageKeys";
 import { assertValidContractId, getContractId } from "@/lib/contracts";
+import { depositAmountToStroops } from "@/lib/decimal";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -46,8 +47,11 @@ export interface DepositParams {
   walletAddress: string;
   /** Vault contract ID on Soroban. */
   contractId: string;
-  /** Amount in stroops (bigint, 7 decimals = 1 XLM, 6 decimals = 1 USDC). */
-  amount: bigint | number;
+  /**
+   * Amount as bigint stroops, or a decimal string in whole units (e.g. "0.3",
+   * at most 7 decimals). Numbers are not accepted: float * 1e7 misrounds.
+   */
+  amount: bigint | string;
 }
 
 export interface WithdrawParams {
@@ -198,9 +202,7 @@ export async function previewDeposit(params: DepositParams): Promise<{
     const server = getServer(network.rpcUrl);
     const account = await server.getAccount(walletAddress);
 
-    const amountStroops = typeof rawAmount === "bigint"
-      ? rawAmount
-      : BigInt(Math.round(rawAmount * 10_000_000));
+    const amountStroops = depositAmountToStroops(rawAmount);
 
     const contract = new Contract(assertValidContractId(contractId, "vault contract"));
     const tx = new TransactionBuilder(account, {
@@ -257,8 +259,7 @@ export async function estimateWithdrawFee(
  * Build a Soroban `deposit` contract invocation transaction.
  *
  * The vault contract's `deposit(user, amount)` function is called.
- * Amount can be provided as bigint stroops (recommended) or as a human-readable number
- * (for backwards compatibility; will be converted to stroops using Math.round).
+ * Amount is bigint stroops or a decimal string, parsed without floating point.
  */
 export async function buildDepositTransaction(
   params: DepositParams
@@ -269,10 +270,7 @@ export async function buildDepositTransaction(
   const server = getServer(network.rpcUrl);
   const account = await server.getAccount(walletAddress);
 
-  // Convert amount to stroops if it's a number
-  const amountStroops = typeof rawAmount === "bigint"
-    ? rawAmount
-    : BigInt(Math.round(rawAmount * 10_000_000));
+  const amountStroops = depositAmountToStroops(rawAmount);
 
   const contract = new Contract(assertValidContractId(contractId, "vault contract"));
 
@@ -506,7 +504,7 @@ export async function executeVaultDeposit(params: {
   vaultId: string;
   contractId: string;
   asset: "USDC" | "XLM";
-  amount: number;
+  amount: bigint | string;
 }): Promise<TransactionReceipt> {
   const { walletAddress, contractId, amount } = params;
 

@@ -506,21 +506,6 @@ func ComputeRiskScore(tvlUsd, apy7dSwing, rewardRatio float64) float64 {
 	return score
 }
 
-// riskScore computes a normalised [0.0, 1.0] risk score for a pool by
-// delegating to ComputeRiskScore with the pool's TVL, 7-day APY swing, and
-// reward-to-total-APY ratio.
-func riskScore(p YieldPool) float64 {
-	var apy7dSwing float64
-	if p.APYPct7d != nil {
-		apy7dSwing = *p.APYPct7d
-	}
-	var rewardRatio float64
-	if p.APY > 0 {
-		rewardRatio = p.APYReward / p.APY
-	}
-	return ComputeRiskScore(p.TVLUsd, apy7dSwing, rewardRatio)
-}
-
 // riskAdjustedAPY penalises high-risk, low-TVL pools.
 // RiskScore is in [0.0, 1.0]; a score of 1.0 halves the effective APY.
 func riskAdjustedAPY(p YieldPool) float64 {

@@ -80,19 +80,6 @@ func (h *UserHandler) getUserByID(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, response.OK(model))
 }
 
-func (h *UserHandler) authorizeUserAccess(w http.ResponseWriter, r *http.Request, userID uuid.UUID) bool {
-	user, ok := auth.GetUserFromContext(r.Context())
-	if !ok {
-		response.WriteJSON(w, http.StatusUnauthorized, response.Err(http.StatusUnauthorized, "UNAUTHORIZED", "authentication required"))
-		return false
-	}
-	if user.ID != userID.String() {
-		response.WriteJSON(w, http.StatusForbidden, response.Err(http.StatusForbidden, "FORBIDDEN", "forbidden"))
-		return false
-	}
-	return true
-}
-
 func (h *UserHandler) getProfile(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.authenticatedUserID(w, r)
 	if !ok {

@@ -38,10 +38,9 @@ type MoneyPathSwitchService struct {
 	repository MoneyPathSwitchRepository
 	audit      AuditLogger
 
-	mu     sync.RWMutex
-	cache  map[moneypath.Operation]cachedSwitch
-	nowFn  func() time.Time
-	logger func(context.Context, string, ...any)
+	mu    sync.RWMutex
+	cache map[moneypath.Operation]cachedSwitch
+	nowFn func() time.Time
 }
 
 type cachedSwitch struct {

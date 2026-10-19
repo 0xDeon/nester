@@ -79,26 +79,6 @@ func (m *mockAPYRepo) DownsampleOlderThan(_ context.Context, age time.Duration) 
 	return nil
 }
 
-// newAPYTestServer wires a mock DeFiLlama server → APYService → APYHandler.
-func newAPYTestServer(t *testing.T, defiLlamaBody string) (*httptest.Server, *mockAPYRepo) {
-	t.Helper()
-
-	defiLlama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(defiLlamaBody))
-	}))
-	t.Cleanup(defiLlama.Close)
-
-	repo := &mockAPYRepo{}
-	svc := service.NewAPYServiceWithClient(repo, defiLlama.URL, defiLlama.Client())
-	mux := http.NewServeMux()
-	NewAPYHandler(svc).Register(mux)
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv, repo
-}
-
 // TestAPYPoller_SuccessfulPolling verifies that snapshots are written for Stellar pools.
 func TestAPYPoller_SuccessfulPolling(t *testing.T) {
 	const body = `{"data":[

@@ -286,7 +286,7 @@ func (c *CompoundInterestCalculator) Calculate(input projection.ProjectionInput)
 	annualRate := input.APY
 
 	// Monthly compound rate calculation
-	monthlyRate := decimal.Zero
+	var monthlyRate decimal.Decimal
 	if input.CompoundFrequency == projection.CompoundDaily {
 		// For daily compounding: (1 + APY/365)^(365/12) - 1
 		dailyRate := annualRate.Div(decimal.NewFromInt(365))

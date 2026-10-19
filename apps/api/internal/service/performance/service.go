@@ -505,10 +505,9 @@ func (s *Service) GetUserAnalytics(ctx context.Context, userID uuid.UUID, fromTi
 	// Build vaults info for comparison table
 	var vaultsInfo []analytics.VaultInfo
 	for _, vault := range userVaults {
-		var lockPeriodDays int
 		// Determine lock period from vault metadata or default to 0
 		// This would come from vault configuration in a real implementation
-		lockPeriodDays = 0 // placeholder
+		lockPeriodDays := 0 // placeholder
 
 		vaultsInfo = append(vaultsInfo, analytics.VaultInfo{
 			ID:             vault.ID.String(),

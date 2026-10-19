@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -539,43 +538,4 @@ func makeAdminToken(t *testing.T, secret string, roles []string) string {
 		t.Fatalf("make signed token: %v", err)
 	}
 	return signed
-}
-
-type adminErrStub struct{}
-
-func (adminErrStub) GetDashboard(context.Context) (admindomain.VaultHealthDashboard, error) {
-	return admindomain.VaultHealthDashboard{}, errors.New("boom")
-}
-func (adminErrStub) ListVaults(context.Context, admindomain.VaultListFilter) ([]admindomain.VaultSummary, int, error) {
-	return nil, 0, service.ErrInvalidAdminInput
-}
-func (adminErrStub) GetVaultDetail(context.Context, uuid.UUID) (admindomain.VaultDetail, error) {
-	return admindomain.VaultDetail{}, vault.ErrVaultNotFound
-}
-func (adminErrStub) PauseVault(context.Context, uuid.UUID) (admindomain.VaultDetail, error) {
-	return admindomain.VaultDetail{}, nil
-}
-func (adminErrStub) UnpauseVault(context.Context, uuid.UUID) (admindomain.VaultDetail, error) {
-	return admindomain.VaultDetail{}, nil
-}
-func (adminErrStub) CreateAllocation(context.Context, service.CreateAllocationInput) (vault.Allocation, error) {
-	return vault.Allocation{}, nil
-}
-func (adminErrStub) UpdateAllocation(context.Context, service.UpdateAllocationInput) (vault.Allocation, error) {
-	return vault.Allocation{}, nil
-}
-func (adminErrStub) DeleteAllocation(context.Context, service.DeleteAllocationInput) error {
-	return nil
-}
-func (adminErrStub) ListUsers(context.Context, admindomain.UserListFilter) ([]admindomain.UserSummary, int, error) {
-	return nil, 0, nil
-}
-func (adminErrStub) ListVaultRebalances(context.Context, uuid.UUID) ([]admindomain.VaultRebalanceRecord, error) {
-	return nil, nil
-}
-func (adminErrStub) GetDetailedHealth(context.Context) (admindomain.DetailedHealth, error) {
-	return admindomain.DetailedHealth{}, nil
-}
-func (adminErrStub) TriggerRebalance(context.Context, uuid.UUID, admindomain.RebalanceRequest) (admindomain.RebalanceResponse, error) {
-	return admindomain.RebalanceResponse{}, nil
 }

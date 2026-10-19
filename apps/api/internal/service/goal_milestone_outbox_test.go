@@ -286,7 +286,8 @@ func TestGoalMilestoneJobHandler_MissingDedupeKeyIsPermanent(t *testing.T) {
 
 func TestMilestoneDedupeKeyIsStableAndPerMilestone(t *testing.T) {
 	goalID := uuid.New()
-	if MilestoneDedupeKey(goalID, 25) != MilestoneDedupeKey(goalID, 25) {
+	first, second := MilestoneDedupeKey(goalID, 25), MilestoneDedupeKey(goalID, 25)
+	if first != second {
 		t.Fatal("MilestoneDedupeKey is not deterministic")
 	}
 	if MilestoneDedupeKey(goalID, 25) == MilestoneDedupeKey(goalID, 50) {

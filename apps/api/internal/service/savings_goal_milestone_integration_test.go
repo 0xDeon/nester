@@ -207,17 +207,3 @@ func waitFor(t *testing.T, timeout time.Duration, done func() bool, describe fun
 		time.Sleep(20 * time.Millisecond)
 	}
 }
-
-// pushCallForMilestone reports whether a push for the given milestone has been
-// recorded. Matched on the payload rather than the title so the check does not
-// break when copy is reworded.
-func pushCallForMilestone(push *notifications.RecordingPushSender, milestone int) bool {
-	for _, call := range push.SnapshotCalls() {
-		if value, ok := call.Payload["milestone"]; ok {
-			if asInt, ok := value.(int); ok && asInt == milestone {
-				return true
-			}
-		}
-	}
-	return false
-}
