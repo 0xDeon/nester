@@ -74,7 +74,7 @@ export function Navbar() {
             <nav
                 className={cn(
                     "fixed left-0 right-0 z-50 transition-all duration-300 border-b",
-                    currentNetwork.id === 'testnet' ? "top-10" : "top-0",
+                    "top-10",
                     isScrolled
                         ? "bg-white/90 backdrop-blur-md border-border shadow-sm py-3"
                         : "bg-white/70 backdrop-blur-sm border-transparent py-4"

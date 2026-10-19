@@ -1,4 +1,4 @@
-.PHONY: build build-adapters test integration-test fmt clippy clean help deploy-testnet
+.PHONY: build build-adapters test integration-test fmt clippy clean help deploy-testnet size-gate test-launch-manifest
 
 # Yield source adapters (#812). Each external protocol gets one small adapter
 # implementing nester_common::adapters::YieldAdapter. Adding a third protocol
@@ -16,6 +16,7 @@ help:
 	@echo "make clippy           - Run clippy linter (must pass clean)"
 	@echo "make clean            - Remove build artifacts"
 	@echo "make deploy-testnet   - Deploy contracts to Stellar testnet"
+	@echo "make size-gate        - Check launch-manifest WASM sizes (run make build first)"
 
 build:
 	@echo "Building all Soroban contracts to WASM..."
@@ -67,3 +68,9 @@ clean:
 
 deploy-testnet:
 	@bash scripts/deploy-testnet.sh
+
+size-gate:
+	@python3 scripts/launch_manifest.py size-gate target/wasm32-unknown-unknown/release
+
+test-launch-manifest:
+	@bash scripts/test-launch-manifest.sh
