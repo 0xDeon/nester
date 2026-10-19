@@ -3817,11 +3817,14 @@ impl VaultContract {
         require_active(&env);
         breaker::require_deposits_allowed(&env);
 
+        // Missing MaxDeposit means the cap was never configured (e.g. a botched
+        // migration). Treat it as 0 — "deposits closed" — rather than silently
+        // granting unlimited capacity (issue #1497).
         let max_deposit: i128 = env
             .storage()
             .instance()
             .get(&DataKey::MaxDeposit)
-            .unwrap_or(i128::MAX);
+            .unwrap_or(0);
         if amount > max_deposit {
             panic_with_error!(&env, ContractError::ExceedsLimit);
         }
@@ -4913,7 +4916,7 @@ impl VaultContract {
             .storage()
             .instance()
             .get(&DataKey::MaxDeposit)
-            .unwrap_or(i128::MAX);
+            .unwrap_or(0); // missing cap → deposits closed (issue #1497)
         if cap <= 0 {
             return 0;
         }
@@ -5180,7 +5183,7 @@ impl VaultContract {
         env.storage()
             .instance()
             .get(&DataKey::MaxDeposit)
-            .unwrap_or(i128::MAX)
+            .unwrap_or(0) // missing cap → deposits closed (issue #1497)
     }
 
     pub fn get_rebalance_threshold(env: Env) -> u32 {
