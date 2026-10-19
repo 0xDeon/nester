@@ -6,7 +6,6 @@ import { useWallet } from "@/components/wallet-provider";
 import { useNotifications } from "@/components/notifications-provider";
 import { ChevronDown, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { NETWORK_BANNER_COPY } from "@/lib/network-copy";
 
 export function NetworkSelector() {
   const { currentNetwork, setNetwork } = useNetwork();
@@ -98,31 +97,15 @@ export function NetworkSelector() {
 
 export function NetworkBanner() {
   const { currentNetwork } = useNetwork();
-  const copy = NETWORK_BANNER_COPY[currentNetwork.id];
-  const isMainnet = currentNetwork.id === 'mainnet';
+
+  if (currentNetwork.id !== 'testnet') return null;
 
   return (
-    <div
-      data-testid="network-banner"
-      className={`fixed top-0 left-0 right-0 z-60 flex h-10 items-center justify-center gap-3 overflow-x-auto whitespace-nowrap border-b px-4 ${
-        isMainnet ? 'border-red-300 bg-red-700' : 'border-yellow-200 bg-black'
-      }`}
-    >
+    <div className="fixed top-0 left-0 right-0 z-60 flex h-10 items-center justify-center border-b border-yellow-200 bg-black px-4">
       <p className="flex items-center gap-2 text-xs font-medium text-white">
-        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-        {copy.message}
+        <AlertTriangle className="h-3.5 w-3.5" />
+        You are on Testnet — tokens have no real value
       </p>
-      {copy.links.map((link) => (
-        <a
-          key={link.href}
-          href={link.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs font-medium text-white underline"
-        >
-          {link.label}
-        </a>
-      ))}
     </div>
   );
 }

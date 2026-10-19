@@ -274,7 +274,7 @@ function TopBar({ bannerOffset }: { bannerOffset: boolean }) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
     const { currentNetwork } = useNetwork();
-    const bannerOffset = true;
+    const bannerOffset = currentNetwork.id === "testnet";
 
     return (
         <div className="min-h-screen bg-[#fafafa] dark:bg-[#0A0A0A]">

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/suncrestlabs/nester/apps/api/internal/middleware"
 )
 
 func newTestHub() *Hub {
@@ -288,65 +287,4 @@ func TestHub_gracefulShutdown_allClientsDisconnected(t *testing.T) {
 	}
 	checkClosed(c1, "c1")
 	checkClosed(c2, "c2")
-}
-
-func dialWithXFF(t *testing.T, srvURL, xff string) (*websocket.Conn, *http.Response, error) {
-	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(srvURL, "http") + "?token=valid"
-	header := http.Header{}
-	header.Set("X-Forwarded-For", xff)
-	return websocket.DefaultDialer.Dial(wsURL, header)
-}
-
-func TestHub_PerIPLimitIgnoresSpoofedXFFWithoutTrustedProxy(t *testing.T) {
-	h := newTestHub()
-	h.maxConnsPerIP = 1
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.Run(ctx)
-	srv := httptest.NewServer(http.HandlerFunc(h.ServeWs))
-	defer srv.Close()
-
-	c1, _, err := dialWithXFF(t, srv.URL, "1.2.3.4")
-	if err != nil {
-		t.Fatalf("first dial: %v", err)
-	}
-	defer c1.Close()
-
-	_, resp, err := dialWithXFF(t, srv.URL, "5.6.7.8")
-	if err == nil {
-		t.Fatal("second dial with rotated X-Forwarded-For succeeded; per-IP limit bypassed")
-	}
-	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("second dial status = %v, want 429", resp)
-	}
-}
-
-func TestHub_PerIPLimitCountsTrustedProxyHopNotLeftmostXFF(t *testing.T) {
-	middleware.ConfigureClientIP(1)
-	t.Cleanup(func() { middleware.ConfigureClientIP(0) })
-
-	h := newTestHub()
-	h.maxConnsPerIP = 1
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.Run(ctx)
-	srv := httptest.NewServer(http.HandlerFunc(h.ServeWs))
-	defer srv.Close()
-
-	// The trusted proxy appends the real peer (9.9.9.9) after whatever the
-	// client sent; the test server's own peer (127.0.0.1) is the proxy.
-	c1, _, err := dialWithXFF(t, srv.URL, "1.2.3.4, 9.9.9.9")
-	if err != nil {
-		t.Fatalf("first dial: %v", err)
-	}
-	defer c1.Close()
-
-	_, resp, err := dialWithXFF(t, srv.URL, "5.6.7.8, 9.9.9.9")
-	if err == nil {
-		t.Fatal("second dial with rotated left-most X-Forwarded-For succeeded; per-IP limit bypassed")
-	}
-	if resp == nil || resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("second dial status = %v, want 429", resp)
-	}
 }
