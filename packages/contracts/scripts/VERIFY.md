@@ -1,5 +1,34 @@
 # Verifying a deployed testnet contract
 
+## Reproducibility prerequisite (issue #1493)
+
+Contract builds are reproducible only when the exact toolchain in
+`packages/contracts/rust-toolchain.toml` is used.  Install it with:
+
+```bash
+cd packages/contracts
+rustup show   # prints active toolchain — must match rust-toolchain.toml
+```
+
+If the active toolchain doesn't match, run:
+
+```bash
+rustup toolchain install   # reads rust-toolchain.toml automatically
+```
+
+Two independent clean builds (`cargo clean && make build`) on any machine with
+the same pinned toolchain must produce bit-identical `*_opt.wasm` files.
+Verify:
+
+```bash
+# Machine A
+sha256sum target/wasm32-unknown-unknown/release/vault_contract_opt.wasm > sha256.txt
+
+# Machine B (same commit, same rust-toolchain.toml)
+sha256sum target/wasm32-unknown-unknown/release/vault_contract_opt.wasm
+# Output must match sha256.txt
+```
+
 `deploy-testnet.sh` records, at the top of `deployed-testnet.env`, the git
 commit and the wasm sha256 of each optimized `.wasm` it deployed. Use those
 to verify a deployed contract still matches source.

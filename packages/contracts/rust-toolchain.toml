@@ -1,0 +1,7 @@
+[toolchain]
+# Pinned toolchain for reproducible WASM builds (issue #1493).
+# Changing this version changes every contract's output hash — update
+# VERIFY.md and re-record the expected sha256 in CI artifacts.
+channel = "1.82.0"
+targets = ["wasm32-unknown-unknown"]
+components = ["rustfmt", "clippy"]

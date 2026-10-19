@@ -2129,6 +2129,56 @@ fn set_max_deposit_event_old_value_reflects_prior_setting() {
 }
 
 // ---------------------------------------------------------------------------
+// MaxDeposit safe-default behaviour (issue #1497)
+//
+// `deposit_internal` used to fall back to `i128::MAX` when `DataKey::MaxDeposit`
+// was absent, silently lifting the guarded-launch cap after a botched migration.
+// The fix changes the default to 0 — "deposits closed" — matching the contract
+// invariant that the cap must be explicitly configured.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn deposit_fails_when_max_deposit_key_is_absent() {
+    let (env, _admin, token, vault, _treasury) = setup();
+    let user = Address::generate(&env);
+    mint(&token, &user, 100 * XLM);
+
+    // Remove the MaxDeposit key from contract storage to simulate a migration
+    // that forgot to set it.
+    env.as_contract(&vault.address, || {
+        env.storage().instance().remove(&crate::DataKey::MaxDeposit);
+    });
+
+    // Any deposit must now be rejected (amount > 0 == amount > missing cap = 0).
+    assert!(
+        vault.try_deposit(&user, &(10 * XLM), &0).is_err(),
+        "deposit must fail when MaxDeposit key is absent"
+    );
+}
+
+#[test]
+fn get_max_deposit_returns_zero_when_key_is_absent() {
+    let (env, _admin, _token, vault, _treasury) = setup();
+
+    env.as_contract(&vault.address, || {
+        env.storage().instance().remove(&crate::DataKey::MaxDeposit);
+    });
+
+    // ERC-4626 max_deposit must also return 0 (deposits unavailable).
+    let dummy_user = Address::generate(&env);
+    assert_eq!(
+        vault.max_deposit(&dummy_user),
+        0,
+        "max_deposit must return 0 when cap key is absent"
+    );
+    assert_eq!(
+        vault.get_max_deposit(),
+        0,
+        "get_max_deposit must return 0 when cap key is absent"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Emergency Withdraw All Positions Tests (issue #736)
 // ---------------------------------------------------------------------------
 
