@@ -1,69 +1,100 @@
 # Nester Soroban Storage Strategy & TTL Architecture
 
-## 1. Overview & Objective
+> **Accuracy note (issue #1488):** This document was rewritten to match the code
+> as it exists today. Claims that were aspirational but not implemented have been
+> replaced with what the code actually does, with file/line citations.
+> Open issues track each remaining gap.
 
-In Soroban (Stellar Smart Contracts), state storage requires rent to remain accessible. If a storage entry's Time-To-Live (TTL) reaches zero without being extended, the entry is archived or deleted, causing user positions to become inaccessible.
+---
 
-This document establishes the storage architecture, storage type classifications, and automatic TTL extension mechanisms implemented across Nester's smart contracts (`VaultContract`, `VaultTokenContract`, `YieldRegistryContract`, `TreasuryContract`, and `AllocationStrategyContract`).
+## 1. Overview
+
+In Soroban, every storage entry pays ongoing rent. An entry whose TTL reaches
+zero is archived (persistent / instance) or deleted (temporary). This document
+describes the storage types currently used across Nester's deployable contracts
+and the TTL extension behaviour that is **actually implemented**.
 
 ---
 
 ## 2. Storage Classification Matrix
 
-| DataKey / Storage Entry | Storage Type | Rationale | Extension Trigger |
+| Contract | DataKey / Storage Entry | Storage Type | Notes |
 | :--- | :--- | :--- | :--- |
-| **`DataKey::Token`** | `Instance` | Global vault configuration; needed on every transaction. | Extended on every deposit/withdraw/rebalance. |
-| **`DataKey::TotalAssets`** | `Instance` | Global accounting state representing aggregate vault reserves. | Extended on deposit, withdraw, harvest, yield report. |
-| **`DataKey::AccruedFees`** | `Instance` | Global fee balance owed to treasury. | Extended on fee accrual and collection. |
-| **`DataKey::CircuitBreaker`** | `Instance` | Autonomous safety thresholds and rate-limiting windows. | Extended on state evaluations and admin updates. |
-| **`DataKey::ExitFeeTiers`** | `Instance` | Fee tiers and tenure discount schedule. | Extended on fee lookups. |
-| **`DataKey::UserPrincipal(Address)`** | `Persistent` | User's personal deposit principal; survives instance dormancy. | Extended on deposit, withdrawal, and balance check. |
-| **`DataKey::UserShares(Address)`** | `Persistent` | User's minted LP shares inside `VaultTokenContract`. | Extended on mint, burn, transfer, and balance query. |
-| **`DataKey::Tenure(Address)`** | `Persistent` | User's deposit timestamp for tenure-tiered fee discounts. | Extended on deposits and fee previews. |
-| **`DataKey::EmergencyRequest(Address)`** | `Persistent` | Queued emergency exit tickets. | Extended on queue processing and status queries. |
-| **`Temporary Data`** | `Temporary` | Transient reentrancy mutex guards and one-block calculation caches. | Automatically reclaimed at end of lifetime. |
+| **`VaultContract`** | `DataKey::Token` | `Instance` | Checked by `require_initialized` (`vault/src/lib.rs:704`) |
+| **`VaultContract`** | `DataKey::Status` | `Instance` | Vault pause state |
+| **`VaultContract`** | Lock positions (`DataKey::Lock*`) | `Persistent` | Extend-on-access; see §3 |
+| **`VaultTokenContract`** | Balances, allowances | `Persistent` | Managed by token contract |
+| **`YieldRegistryContract`** | Source registry entries | `Instance` / `Persistent` | |
+| **`NesterContract`** | `DataKey::Version`, admin state | `Instance` | |
+| **`AllocationStrategyContract`** | Allocation weights | `Instance` | |
 
 ---
 
-## 3. TTL Extension Constants & Strategy
+## 3. TTL Extension — What the Code Actually Does
 
-Soroban ledgers close approximately every **5 seconds** (~17,280 ledgers per day, ~518,400 ledgers per month).
+### 3.1 Lock-entry TTL (vault only)
+
+The only `extend_ttl` calls in the vault today are for **lock-position entries**
+(`vault/src/lib.rs:1768`, `1778`, `1793`):
 
 ```rust
-/// Minimum remaining ledger count before extending TTL (~7 days).
-pub const TTL_BUMP_THRESHOLD_LEDGERS: u32 = 120_960;
+// vault/src/lib.rs:1755-1756
+const LOCK_TTL_THRESHOLD: u32 = 1_000;
+const LOCK_TTL_EXTEND_TO: u32 = 10_000;
 
-/// Number of ledgers to extend TTL to upon triggering (~30 days).
-pub const TTL_EXTEND_TO_LEDGERS: u32 = 518_400;
+// vault/src/lib.rs:1768
+env.storage().persistent().extend_ttl(&key, LOCK_TTL_THRESHOLD, LOCK_TTL_EXTEND_TO);
 ```
 
-### Automatic Extension Behavior:
-1. **Instance Storage**:
-   ```rust
-   env.storage().instance().extend_ttl(TTL_BUMP_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
-   ```
-   Invoked inside `require_initialized(&env)` on every user or operator interaction.
-2. **Persistent User Balances**:
-   ```rust
-   env.storage().persistent().extend_ttl(&key, TTL_BUMP_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
-   ```
-   Invoked whenever a user interacts with their vault positions (`deposit`, `withdraw`, `preview`).
+These extend lock-position entries by ~10,000 ledgers (~0.6 days at 5 s/ledger)
+whenever a lock is settled or queried. This is intentionally short because locks
+have a bounded natural lifetime.
+
+### 3.2 `require_initialized` does NOT extend TTL
+
+The `require_initialized` helper (`vault/src/lib.rs:704`) only **checks** that
+`DataKey::Token` is set in instance storage — it does not call `extend_ttl`:
+
+```rust
+// vault/src/lib.rs:704-708
+fn require_initialized(env: &Env) {
+    if !env.storage().instance().has(&DataKey::Token) {
+        panic_with_error!(env, ContractError::NotInitialized);
+    }
+}
+```
+
+Instance storage TTL extension on user interactions is **not yet implemented**.
+This is a known gap — if the vault becomes dormant, instance storage can expire.
+Tracked as a follow-up to issue #1220.
+
+### 3.3 No `TTL_BUMP_THRESHOLD_LEDGERS` / `TTL_EXTEND_TO_LEDGERS` constants
+
+The previous version of this document described two named constants
+(`TTL_BUMP_THRESHOLD_LEDGERS = 120_960`, `TTL_EXTEND_TO_LEDGERS = 518_400`).
+**These constants do not exist** anywhere in the codebase today. The only TTL
+constants live locally in `vault/src/lib.rs:1755-1756` (see §3.1).
 
 ---
 
-## 4. Rent Cost & Budget Modeling
+## 4. Rent Cost Reference
 
-- **Base Cost**: Soroban charges ~0.000005 XLM per 1 KB of persistent storage per 10,000 ledgers.
-- **Vault Footprint**:
-  - Global Vault Instance State: ~1.2 KB ($\approx 0.0006$ XLM / month).
-  - Per User Position (Principal + Shares + Tenure): ~160 Bytes ($\approx 0.00008$ XLM / month).
-  - 10,000 active users: $\approx 0.8$ XLM / month in rent.
-- **Budgeting Mechanism**:
-  The protocol treasury subsidizes vault instance storage from management fees ($0.10\%$ annual AUM), ensuring zero maintenance burden on dormant depositors.
+| Storage type | Approx. cost (Soroban) |
+| :--- | :--- |
+| Instance (global vault state, ~1-2 KB) | ~0.0006 XLM / month |
+| Persistent per-user position (160 B) | ~0.00008 XLM / month |
+
+Figures are illustrative; actual rent rates depend on the current network fee
+schedule. Because instance TTL auto-extension is not implemented, operators
+should monitor instance TTL directly and bump manually until the auto-extension
+feature ships.
 
 ---
 
-## 5. Verification & Lifecycle Persistence Tests
+## 5. Verification
 
-State survival past TTL boundaries is asserted via integration tests:
-- `test_storage_ttl_persistence_after_long_ledger_advance`: Simulates advancing ledger sequence by $> 500,000$ ledgers and proves user balances and vault state remain 100% accessible.
+End-to-end TTL tests added under issue #1220 live in
+`tests/integration/src/integration/lifecycle_tests.rs` and assert that user
+balances survive a large ledger-sequence advance. Those tests are run by
+`cargo test -p nester-integration-tests` (no filter) -- see
+`.github/workflows/ci.yml` `contracts` job, step "Run integration tests".

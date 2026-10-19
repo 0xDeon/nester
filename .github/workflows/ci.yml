@@ -564,6 +564,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: wasm32-unknown-unknown
+          components: rustfmt,clippy
 
       - name: Add wasm32-unknown-unknown target
         run: rustup target add wasm32-unknown-unknown
@@ -625,6 +626,22 @@ jobs:
       - name: Check vault-contract fuzz target compiles
         working-directory: packages/contracts/contracts/vault/fuzz
         run: cargo check --bin conversion_math
+
+      # Blocking gate (#1484): format violations fail the job so no PR can
+      # land unformatted Rust.
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      # Blocking gate (#1484): clippy warnings are errors; -D warnings ensures
+      # any new lint introduced by a toolchain bump also blocks the PR.
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Full integration suite (#1483): run without a filter so every test in
+      # nester-integration-tests executes, not just the property_tests subset
+      # that already ran above.
+      - name: Run integration tests
+        run: cargo test -p nester-integration-tests
 
   sbom:
     name: SBOM Generation
