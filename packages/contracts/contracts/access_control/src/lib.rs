@@ -54,6 +54,11 @@
 
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "NesterAccessControl");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 use soroban_sdk::{contracttype, panic_with_error, symbol_short, Address, Env, Symbol, Vec};
 
 use nester_common::{emit_event, ContractError};
@@ -638,6 +643,9 @@ fn add_member(env: &Env, role: &Role, account: &Address) {
         if existing == *account {
             return;
         }
+    }
+    if members.len() >= nester_common::MAX_ROLE_MEMBERS {
+        panic_with_error!(env, ContractError::InvalidOperation);
     }
     members.push_back(account.clone());
     env.storage()

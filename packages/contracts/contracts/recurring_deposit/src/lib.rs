@@ -1,5 +1,10 @@
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "RecurringDepositContract");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 mod test;
 
 use soroban_sdk::{
@@ -494,5 +499,9 @@ impl RecurringDepositContract {
 
     pub fn get_schema_version(env: Env) -> u32 {
         Upgrade::get_schema_version(&env)
+    }
+
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
     }
 }

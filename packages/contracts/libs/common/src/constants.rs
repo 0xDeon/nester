@@ -98,3 +98,36 @@ pub const MAX_OPEN_LOCKS_PER_USER: u32 = 20;
 /// than `MAX_OPEN_LOCKS_PER_USER` alone would suggest, since it is a
 /// vault-wide total across all depositors, not one user's share of it.
 pub const MAX_TOTAL_OPEN_LOCKS: u32 = 200;
+
+// ---------------------------------------------------------------------------
+// Keeper-managed TTL extension (issue #1485)
+// ---------------------------------------------------------------------------
+/// Ledgers remaining below which a permissionless keeper should renew instance
+/// storage TTL. At 5 s/ledger ≈ 7 days.
+pub const INSTANCE_TTL_THRESHOLD_LEDGERS: u32 = 120_960;
+/// Target ledger count when extending instance storage TTL. At 5 s/ledger ≈ 30 days.
+pub const INSTANCE_TTL_EXTEND_TO_LEDGERS: u32 = 518_400;
+/// Ledgers remaining below which a keeper should renew a per-user position entry.
+pub const POSITION_TTL_THRESHOLD_LEDGERS: u32 = 120_960;
+/// Target ledger count when extending a per-user position entry. At 5 s/ledger ≈ 30 days.
+pub const POSITION_TTL_EXTEND_TO_LEDGERS: u32 = 518_400;
+
+// ---------------------------------------------------------------------------
+// Collection size caps (issue #1491)
+// ---------------------------------------------------------------------------
+/// Maximum yield sources that may be registered in the yield registry.
+/// `get_active_sources` and the rebalance iteration walk this list in a single
+/// transaction; a larger list pushes CPU past the per-tx budget.
+pub const MAX_YIELD_SOURCES: u32 = 32;
+/// Maximum members of any single role in the access-control contract.
+/// `get_role_members` paginates, but `grant_role` iterates to check for
+/// duplicates, so this bounds that iteration's cost.
+pub const MAX_ROLE_MEMBERS: u32 = 20;
+/// Maximum entries in the vault emergency-withdrawal queue at any one time.
+/// `process_emergency_queue` walks the full queue per call; without a cap a
+/// runaway queue makes that entrypoint unreachable.
+pub const MAX_EMERGENCY_QUEUE: u32 = 50;
+/// Maximum pools registered in the lp_aggregator.
+/// `find_paths` / `get_best_route` iterate the full list; without a cap a
+/// large pool list exhausts the per-tx budget.
+pub const MAX_REGISTERED_POOLS: u32 = 20;
