@@ -5,7 +5,7 @@ use soroban_sdk::{
     token, Address, Env,
 };
 
-use crate::{ReferralContract, ReferralContractClient};
+use crate::{DataKey, ReferralContract, ReferralContractClient};
 
 fn setup() -> (
     Env,
@@ -324,3 +324,56 @@ fn only_the_registered_vault_can_accrue_rewards() {
     let result = client.try_accrue_reward(&user, &1_000_000i128, &MIN_DEPOSIT, &deposit_time);
     assert!(result.is_err());
 }
+
+#[test]
+fn registering_500_referrals_keeps_instance_entry_size_constant() {
+    let (env, _admin, _vault, _token, client) = setup();
+    // 500 contract invocations in a single test exceeds the test host's cumulative CPU/memory limit
+    env.budget().reset_unlimited();
+
+    // Verify initial instance storage state: only the global keys exist
+    env.as_contract(&client.address, || {
+        assert!(env.storage().instance().has(&DataKey::Vault));
+        assert!(env.storage().instance().has(&DataKey::Token));
+        assert!(env.storage().instance().has(&DataKey::BudgetRemaining));
+        assert!(env.storage().instance().has(&DataKey::ShareBps));
+        assert!(env.storage().instance().has(&DataKey::MinReferredDeposit));
+        assert!(env.storage().instance().has(&DataKey::MinRefereeTenureSeconds));
+        assert!(env.storage().instance().has(&DataKey::MaxRewardedReferrals));
+        assert!(env.storage().instance().has(&DataKey::MaxRewardPerReferrer));
+        assert!(env.storage().instance().has(&DataKey::MinClaim));
+    });
+
+    let referrer = Address::generate(&env);
+
+    for _ in 0..500 {
+        let user = Address::generate(&env);
+        client.register_referral(&user, &referrer);
+
+        // Assert that the per-user Referrer key is in persistent storage, NOT instance storage
+        env.as_contract(&client.address, || {
+            let key = DataKey::Referrer(user.clone());
+            assert!(env.storage().persistent().has(&key));
+            assert!(!env.storage().instance().has(&key));
+        });
+    }
+
+    // Verify after 500 registrations that instance storage contains strictly the same configuration keys
+    env.as_contract(&client.address, || {
+        assert!(env.storage().instance().has(&DataKey::Vault));
+        assert!(env.storage().instance().has(&DataKey::Token));
+        assert!(env.storage().instance().has(&DataKey::BudgetRemaining));
+        assert!(env.storage().instance().has(&DataKey::ShareBps));
+        assert!(env.storage().instance().has(&DataKey::MinReferredDeposit));
+        assert!(env.storage().instance().has(&DataKey::MinRefereeTenureSeconds));
+        assert!(env.storage().instance().has(&DataKey::MaxRewardedReferrals));
+        assert!(env.storage().instance().has(&DataKey::MaxRewardPerReferrer));
+        assert!(env.storage().instance().has(&DataKey::MinClaim));
+        // And referrer per-user states never entered instance storage
+        assert!(!env.storage().instance().has(&DataKey::Referrer(referrer.clone())));
+        assert!(!env.storage().instance().has(&DataKey::ReferredCount(referrer.clone())));
+        assert!(!env.storage().instance().has(&DataKey::RewardBalance(referrer.clone())));
+        assert!(!env.storage().instance().has(&DataKey::LifetimeReward(referrer.clone())));
+    });
+}
+
