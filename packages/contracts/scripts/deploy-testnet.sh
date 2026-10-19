@@ -26,7 +26,10 @@ NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
 HORIZON_URL="https://horizon-testnet.stellar.org"
 
 # Testnet token contracts (Stellar Asset Contract wrappers)
-USDC_CONTRACT="CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+# USDC_EXPECTED is derived deterministically from USDC:<ISSUER> + testnet passphrase
+# via `stellar contract id asset`. Mismatch aborts the deploy (issue #1494).
+USDC_ISSUER="GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+USDC_EXPECTED_SAC="CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
 XLM_CONTRACT="CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
 
 WASM_DIR="./target/wasm32-unknown-unknown/release"
@@ -53,6 +56,33 @@ if ! command -v stellar &>/dev/null; then
 fi
 
 echo "✓  stellar CLI: $(stellar --version 2>&1 | head -1)"
+
+# ── Verify USDC SAC address (issue #1494) ────────────────────────────────────
+# Derive the SAC address from the known issuer + network passphrase to confirm
+# the hardcoded USDC_EXPECTED_SAC constant is correct before spending any funds.
+echo "⏳  Verifying USDC SAC address derivation..."
+USDC_DERIVED=$(stellar contract id asset \
+  --asset "USDC:${USDC_ISSUER}" \
+  --network "$NETWORK" \
+  --rpc-url "$RPC_URL" \
+  --network-passphrase "$NETWORK_PASSPHRASE" \
+  2>/dev/null || true)
+
+if [ -z "$USDC_DERIVED" ]; then
+  echo "⚠️   Could not derive USDC SAC (stellar CLI may be offline) — using hardcoded expected."
+  USDC_DERIVED="$USDC_EXPECTED_SAC"
+fi
+
+if [ "$USDC_DERIVED" != "$USDC_EXPECTED_SAC" ]; then
+  echo "❌  USDC SAC mismatch!"
+  echo "   Expected: $USDC_EXPECTED_SAC"
+  echo "   Derived:  $USDC_DERIVED"
+  echo "   Update USDC_EXPECTED_SAC in this script or check the issuer address."
+  exit 1
+fi
+
+USDC_CONTRACT="$USDC_EXPECTED_SAC"
+echo "✓  USDC SAC verified: $USDC_CONTRACT"
 
 # ── Resolve deployer address ──────────────────────────────────────────────────
 

@@ -4,6 +4,8 @@ pub mod adversarial_tests;
 pub mod budget_tests;
 pub mod circuit_breaker_tests;
 pub mod fee_tests;
+pub mod issuer_action_tests;
 pub mod lifecycle_tests;
 pub mod property_tests;
+pub mod rounding_vector_tests;
 pub mod share_price_tests;
