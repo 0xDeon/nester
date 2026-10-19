@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
-	"github.com/suncrestlabs/nester/apps/api/internal/middleware"
 )
 
 func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
@@ -570,6 +570,23 @@ func (h *Hub) decrementIPLocked(ip string) {
 	h.connsByIP[ip]--
 }
 
+// clientIP extracts the caller's IP for per-IP connection limiting,
+// preferring a proxy-supplied X-Forwarded-For (first hop) and falling back
+// to the raw remote address.
+func clientIP(r *http.Request) string {
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		if idx := strings.IndexByte(fwd, ','); idx != -1 {
+			return strings.TrimSpace(fwd[:idx])
+		}
+		return strings.TrimSpace(fwd)
+	}
+	host := r.RemoteAddr
+	if idx := strings.LastIndexByte(host, ':'); idx != -1 {
+		return host[:idx]
+	}
+	return host
+}
+
 func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	var userID, sessionID string
@@ -584,7 +601,7 @@ func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ip := middleware.ClientIP(r)
+	ip := clientIP(r)
 	h.mu.Lock()
 	allowed := h.incrementIPLocked(ip)
 	h.mu.Unlock()

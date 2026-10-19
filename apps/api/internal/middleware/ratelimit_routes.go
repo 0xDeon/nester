@@ -32,7 +32,7 @@ func userOrIP(r *http.Request) string {
 	if id := userIDFromContext(r); id != "" {
 		return id
 	}
-	return ClientIP(r)
+	return clientIP(r)
 }
 
 // GlobalRateLimiter enforces a per-client-IP limit across all requests except
@@ -50,7 +50,7 @@ func GlobalRateLimiter(l Limiter, excludePrefixes []string) func(http.Handler) h
 				}
 			}
 
-			allowed, wait := l.Allow(r.Context(), ClientIP(r))
+			allowed, wait := l.Allow(r.Context(), clientIP(r))
 			if !allowed {
 				writeRateLimited(w, wait, "rate limit exceeded")
 				return
@@ -65,7 +65,7 @@ func GlobalRateLimiter(l Limiter, excludePrefixes []string) func(http.Handler) h
 // untouched. Keying by IP works even for pre-authentication routes (e.g. the
 // auth challenge/verify handshake) where no user identity exists yet.
 func SensitiveRouteLimiter(l Limiter, routes []RouteMatch, message string) func(http.Handler) http.Handler {
-	return sensitiveRouteLimiter(l, routes, ClientIP, message)
+	return sensitiveRouteLimiter(l, routes, clientIP, message)
 }
 
 // SensitiveUserRouteLimiter applies a strict limit to a fixed set of
