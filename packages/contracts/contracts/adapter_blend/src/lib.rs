@@ -1,4 +1,9 @@
 #![no_std]
+
+soroban_sdk::contractmeta!(key = "name", val = "AdapterBlend");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
 //! Blend Capital lending-pool adapter.
 //!
 //! Blend does not expose `deposit`/`withdraw`. A pool takes a single
@@ -341,6 +346,13 @@ impl YieldAdapter for BlendAdapterContract {
             .instance()
             .get(&DataKey::Units)
             .unwrap_or(0i128)
+    }
+}
+
+#[contractimpl]
+impl BlendAdapterContract {
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
     }
 }
 

@@ -1,5 +1,10 @@
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "AllocationStrategyContract");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 use soroban_sdk::{
     contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, BytesN, Env, Error,
     IntoVal, Symbol, Val, Vec,
@@ -1208,6 +1213,9 @@ fn registry_get_active_sources(env: &Env, registry_id: &Address) -> Vec<Registry
         Ok(Ok(v)) => v,
         Ok(Err(_)) => Vec::new(env),
         Err(_) => Vec::new(env),
+    }
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
     }
 }
 

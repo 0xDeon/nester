@@ -32,6 +32,11 @@
 
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "ReferralContract");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 use soroban_sdk::{
     contract, contractimpl, contracttype, panic_with_error, symbol_short, token, Address, Env,
     Symbol,
@@ -481,6 +486,9 @@ impl ReferralContract {
 
     pub fn accept_admin(env: Env, new_admin: Address) {
         AccessControl::accept_admin(&env, &new_admin);
+    }
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
     }
 }
 

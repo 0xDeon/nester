@@ -20,6 +20,11 @@
 
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "AdapterPool");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 use soroban_sdk::{
     contract, contractimpl, contracttype, panic_with_error, symbol_short, token, Address, Env,
     IntoVal, Symbol, Val, Vec,
@@ -323,6 +328,13 @@ fn require_vault(env: &Env, caller: &Address) {
     let vault: Address = env.storage().instance().get(&DataKey::Vault).unwrap();
     if caller != &vault {
         panic_with_error!(env, ContractError::Unauthorized);
+    }
+}
+
+#[contractimpl]
+impl PoolAdapterContract {
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
     }
 }
 

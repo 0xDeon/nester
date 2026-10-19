@@ -25,6 +25,11 @@
 
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "YieldRegistryContract");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 use soroban_sdk::{
     contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, BytesN, Env,
     Symbol, Vec,
@@ -336,6 +341,9 @@ impl YieldRegistryContract {
         save_source(&env, &id, &source);
 
         let mut list = source_list(&env);
+        if list.len() >= nester_common::MAX_YIELD_SOURCES {
+            panic_with_error!(&env, ContractError::InvalidOperation);
+        }
         list.push_back(id.clone());
         env.storage().instance().set(&DataKey::SourceList, &list);
 
@@ -1383,6 +1391,19 @@ impl YieldRegistryContract {
         } else {
             current
         }
+    }
+
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    }
+
+    /// Permissionless TTL renewal so a keeper can keep the registry alive (#1485).
+    /// All yield-registry state lives in instance storage; `user` is ignored.
+    pub fn extend_ttl(env: Env, _user: Option<Address>) {
+        use nester_common::{INSTANCE_TTL_EXTEND_TO_LEDGERS, INSTANCE_TTL_THRESHOLD_LEDGERS};
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD_LEDGERS, INSTANCE_TTL_EXTEND_TO_LEDGERS);
     }
 }
 

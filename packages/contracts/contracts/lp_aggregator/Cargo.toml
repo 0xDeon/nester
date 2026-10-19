@@ -2,12 +2,14 @@
 name = "lp_aggregator"
 version = "0.1.0"
 edition = "2021"
+build = "../../build-meta.rs"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
+nester-common = { path = "../../libs/common" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

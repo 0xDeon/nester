@@ -1,5 +1,10 @@
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "VaultContract");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 mod basket;
 mod breaker;
 pub mod conversion;
@@ -4547,6 +4552,9 @@ impl VaultContract {
 
         if liquid_reserves < return_amount {
             let mut queue = get_emergency_queue(&env);
+            if queue.len() >= nester_common::MAX_EMERGENCY_QUEUE {
+                panic_with_error!(&env, ContractError::InvalidOperation);
+            }
             queue.push_back(EmergencyRequest {
                 user: user.clone(),
                 amount: return_amount,
@@ -5249,6 +5257,44 @@ impl VaultContract {
             target
         } else {
             current
+        }
+    }
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    }
+
+    /// Permissionless keeper entrypoint that extends storage TTL so dormant
+    /// positions are never archived (#1485).
+    ///
+    /// - `user = None`  → extends the contract's instance storage.
+    /// - `user = Some(addr)` → extends every persistent key owned by that address.
+    pub fn extend_ttl(env: Env, user: Option<Address>) {
+        use nester_common::{
+            INSTANCE_TTL_EXTEND_TO_LEDGERS, INSTANCE_TTL_THRESHOLD_LEDGERS,
+            POSITION_TTL_EXTEND_TO_LEDGERS, POSITION_TTL_THRESHOLD_LEDGERS,
+        };
+        match user {
+            None => {
+                env.storage()
+                    .instance()
+                    .extend_ttl(INSTANCE_TTL_THRESHOLD_LEDGERS, INSTANCE_TTL_EXTEND_TO_LEDGERS);
+            }
+            Some(u) => {
+                for key in [
+                    DataKey::UserPrincipal(u.clone()),
+                    DataKey::UserYield(u.clone()),
+                    DataKey::FirstDepositAt(u.clone()),
+                    DataKey::DepositTime(u.clone()),
+                ] {
+                    if env.storage().persistent().has(&key) {
+                        env.storage().persistent().extend_ttl(
+                            &key,
+                            POSITION_TTL_THRESHOLD_LEDGERS,
+                            POSITION_TTL_EXTEND_TO_LEDGERS,
+                        );
+                    }
+                }
+            }
         }
     }
 }

@@ -26,6 +26,11 @@
 
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "SavingsGoalContract");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 use soroban_sdk::{
     contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, IntoVal,
     Symbol, Vec,
@@ -617,6 +622,9 @@ fn is_known_vault(env: &Env, vault: &Address) -> bool {
         &Symbol::new(env, "is_nester_vault"),
         soroban_sdk::vec![env, vault.into_val(env)],
     )
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    }
 }
 
 // ---------------------------------------------------------------------------

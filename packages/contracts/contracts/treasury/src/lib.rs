@@ -1,4 +1,9 @@
 #![no_std]
+
+soroban_sdk::contractmeta!(key = "name", val = "TreasuryContract");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
 use nester_access_control::{AccessControl, Role};
 use nester_common::{with_reentrancy_guard, CalleeAllowlist, ContractError};
 use soroban_sdk::{
@@ -451,6 +456,17 @@ impl TreasuryContract {
         } else {
             current
         }
+    }
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    }
+
+    /// Permissionless TTL renewal so a keeper can keep treasury state alive (#1485).
+    pub fn extend_ttl(env: Env, _user: Option<Address>) {
+        use nester_common::{INSTANCE_TTL_EXTEND_TO_LEDGERS, INSTANCE_TTL_THRESHOLD_LEDGERS};
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD_LEDGERS, INSTANCE_TTL_EXTEND_TO_LEDGERS);
     }
 }
 

@@ -52,6 +52,11 @@
 
 #![no_std]
 
+soroban_sdk::contractmeta!(key = "name", val = "GoalRewardsContract");
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "source_repo", val = "github.com/Suncrest-Labs/nester");
+soroban_sdk::contractmeta!(key = "commit", val = env!("GIT_COMMIT_HASH"));
+
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
     vec, Address, BytesN, Env, IntoVal, Symbol, Val, Vec,
@@ -787,6 +792,9 @@ fn read_vault_balance(env: &Env, vault: &Address, owner: &Address) -> i128 {
 fn select_tier(tiers: &Vec<RewardTierStored>, target_amount: i128) -> Option<RewardTier> {
     let buf: TierBuf = tiers.clone().into();
     goal_effort::select_tier(&buf, target_amount)
+    pub fn version(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    }
 }
 
 #[cfg(test)]
