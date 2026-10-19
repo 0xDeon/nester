@@ -15,6 +15,9 @@ import {
 
 import { usePortfolio } from "@/components/portfolio-provider";
 import { useWallet } from "@/components/wallet-provider";
+import { useNetwork } from "@/hooks/useNetwork";
+import { MainnetAckDialog } from "@/components/network/MainnetAckDialog";
+import { acknowledgeMainnet, hasAcknowledgedMainnet } from "@/lib/mainnet-ack";
 import { cn } from "@/lib/utils";
 import { useOfflineStatus } from "@/hooks/useOfflineStatus";
 import type { Vault as VaultDefinition, MarketStrategy } from "@/lib/types/vault";
@@ -176,6 +179,8 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
   const { address } = useWallet();
   const { getAvailableBalance, recordDeposit, refreshBalances } = usePortfolio();
   const { isOffline } = useOfflineStatus();
+  const { currentNetwork } = useNetwork();
+  const [showMainnetAck, setShowMainnetAck] = useState(false);
 
   const [amountInput, setAmountInput] = useState("");
   const [state, setState] = useState<ActionState>("input");
@@ -233,8 +238,13 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
     onClose();
   };
 
-  const handleDeposit = async () => {
+  const handleDeposit = async (ackConfirmed = false) => {
     if (!vault || !address || !canSubmit) return;
+
+    if (currentNetwork.id === "mainnet" && !ackConfirmed && !hasAcknowledgedMainnet(address)) {
+      setShowMainnetAck(true);
+      return;
+    }
 
     setErrorMsg("");
 
@@ -575,7 +585,7 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                 onClick={
                   state === "error"
                     ? () => { setState("input"); setErrorMsg(""); }
-                    : handleDeposit
+                    : () => handleDeposit()
                 }
                 disabled={
                   state === "building" ||
@@ -609,6 +619,16 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
             )}
           </div>
         </div>
+        {showMainnetAck && (
+          <MainnetAckDialog
+            onCancel={() => setShowMainnetAck(false)}
+            onConfirm={() => {
+              if (address) acknowledgeMainnet(address);
+              setShowMainnetAck(false);
+              void handleDeposit(true);
+            }}
+          />
+        )}
         </>
       )}
     </ModalShell>

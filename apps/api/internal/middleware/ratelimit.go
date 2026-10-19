@@ -12,7 +12,7 @@ import (
 // trustedProxyCount is the number of trusted reverse proxies / load balancers in
 // front of the API. It defaults to 0 (trust none: rate limits key off the direct
 // connection address) and is set once at startup via ConfigureClientIP. When
-// greater than 0, clientIP derives the originating client address from the
+// greater than 0, ClientIP derives the originating client address from the
 // X-Forwarded-For chain, counting hops from the right so spoofed left-most
 // entries cannot forge a client IP past the trusted-proxy boundary.
 var trustedProxyCount int
@@ -85,7 +85,7 @@ func (l *limiter) allow(key string) (bool, time.Duration) {
 	return false, wait
 }
 
-// clientIP returns the address used to key rate limits for r.
+// ClientIP returns the address used to key rate limits for r.
 //
 // With no trusted proxies configured (the default), it is the direct connection
 // address from r.RemoteAddr (port stripped). When trustedProxyCount > 0, the API
@@ -94,7 +94,7 @@ func (l *limiter) allow(key string) (bool, time.Duration) {
 // the right-most hop and the entry trustedProxyCount positions further left is
 // returned. Counting from the right means a client cannot spoof its way past the
 // trusted-proxy boundary by injecting extra left-most X-Forwarded-For entries.
-func clientIP(r *http.Request) string {
+func ClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
@@ -132,7 +132,7 @@ func writeRateLimited(w http.ResponseWriter, wait time.Duration, message string)
 // limit requests per window.
 func IPRateLimiter(limit int, window time.Duration) func(http.Handler) http.Handler {
 	l := newLimiter(limit, window)
-	return rateLimitMiddleware(l, clientIP)
+	return rateLimitMiddleware(l, ClientIP)
 }
 
 // WalletRateLimiter returns middleware that enforces a per-wallet rate limit.
@@ -162,7 +162,7 @@ func WriteMethodRateLimiter(limit int, window time.Duration) func(http.Handler) 
 				return
 			}
 
-			allowed, wait := l.allow(clientIP(r))
+			allowed, wait := l.allow(ClientIP(r))
 			if !allowed {
 				writeRateLimited(w, wait, "write rate limit exceeded")
 				return
