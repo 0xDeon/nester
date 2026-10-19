@@ -1,4 +1,9 @@
 #![no_std]
+// storage.rs exports key-builder helpers whose parameters are intentionally
+// ignored (the key is derived from the type alone). The leading-underscore
+// convention suppresses the variable warning but not the broader lint under
+// some clippy configurations.
+#![allow(unused_variables)]
 
 pub mod adapters;
 pub mod attestation;
