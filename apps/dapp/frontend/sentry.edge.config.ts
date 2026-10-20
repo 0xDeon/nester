@@ -9,6 +9,7 @@ import {
   getServerDsn,
   getTracesSampleRate,
 } from "@/lib/observability/sentry-config";
+import { sentryPrivacyOptions } from "@/lib/observability/sentry-privacy";
 import { scrubSentryEvent } from "@/lib/observability/sentry-scrub";
 
 const dsn = getServerDsn();
@@ -18,6 +19,7 @@ if (dsn) {
     dsn,
     environment: getEnvironment(),
     tracesSampleRate: getTracesSampleRate(),
+    ...sentryPrivacyOptions,
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryEvent,
   });

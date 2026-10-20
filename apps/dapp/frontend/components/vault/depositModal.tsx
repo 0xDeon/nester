@@ -18,6 +18,8 @@ import { useWallet } from "@/components/wallet-provider";
 import { cn } from "@/lib/utils";
 import { useOfflineStatus } from "@/hooks/useOfflineStatus";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useDepositPreflight } from "@/hooks/useDepositPreflight";
+import { addUsdcTrustline, preflightMessage } from "@/lib/stellar/preflight";
 import { TransactionAnnouncer } from "@/components/vault/transactionAnnouncer";
 import type { Vault as VaultDefinition, MarketStrategy } from "@/lib/types/vault";
 import { vaultsApi } from "@/lib/api/vaults";
@@ -257,8 +259,29 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
     return null;
   }, [amount, balance, selectedAsset]);
 
+  const { result: preflight, refresh: refreshPreflight, horizonUrl, networkPassphrase } =
+    useDepositPreflight({ address, asset: selectedAsset, amount, enabled: open && !!vault });
+  const [addingTrustline, setAddingTrustline] = useState(false);
+  const [trustlineError, setTrustlineError] = useState("");
+  const preflightBlocked = !!preflight && preflight.status !== "ready";
+  const preflightCopy = preflight ? preflightMessage(preflight) : null;
+
+  const handleAddTrustline = async () => {
+    if (!address) return;
+    setAddingTrustline(true);
+    setTrustlineError("");
+    try {
+      await addUsdcTrustline({ horizonUrl, networkPassphrase, address });
+      refreshPreflight();
+    } catch (err) {
+      setTrustlineError(humanizeError(err));
+    } finally {
+      setAddingTrustline(false);
+    }
+  };
+
   const canSubmit =
-    !!vault && !!address && amount > 0 && !validationError && state === "input" && !isOffline;
+    !!vault && !!address && amount > 0 && !validationError && state === "input" && !isOffline && !preflightBlocked;
 
   const effectiveApy = selectedStrategy ? selectedStrategy.apy / 100 : (meta ? meta.apy : 0);
   const estimatedYield = amount * effectiveApy;
@@ -630,6 +653,33 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{errorMsg}</span>
               </div>
+            </div>
+          )}
+
+          {state === "input" && preflightBlocked && preflightCopy && (
+            <div
+              role="alert"
+              data-testid="preflight-banner"
+              data-status={preflight?.status}
+              className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"
+            >
+              <div className="flex items-start gap-2 text-sm text-amber-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{preflightCopy}</span>
+              </div>
+              {preflight?.status === "no_trustline" && (
+                <button
+                  type="button"
+                  onClick={handleAddTrustline}
+                  disabled={addingTrustline}
+                  className="mt-3 rounded-full bg-[#0a0a0a] px-4 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                >
+                  {addingTrustline ? "Adding trustline…" : "Add USDC trustline"}
+                </button>
+              )}
+              {trustlineError && (
+                <p className="mt-2 text-xs text-destructive">{trustlineError}</p>
+              )}
             </div>
           )}
 

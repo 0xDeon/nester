@@ -12,6 +12,7 @@ import {
   getEnvironment,
   getTracesSampleRate,
 } from "@/lib/observability/sentry-config";
+import { sentryPrivacyOptions } from "@/lib/observability/sentry-privacy";
 import { scrubSentryEvent } from "@/lib/observability/sentry-scrub";
 
 const dsn = getClientDsn();
@@ -25,6 +26,7 @@ if (dsn) {
     // the same bar lib/observability/sanitize.ts enforces for the console/
     // beacon sink. beforeSend is the last gate before a Sentry event is
     // transmitted.
+    ...sentryPrivacyOptions,
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryEvent,
   });
