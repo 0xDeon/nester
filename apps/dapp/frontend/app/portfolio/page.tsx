@@ -172,7 +172,7 @@ export default function PortfolioPage() {
         compareHistory: ProtocolApyPoint[];
         compareSnapshots: ProtocolSnapshot[];
     } => {
-        const protocols = ["Blend", "Aave", "Compound", "Nester"];
+        const protocols = ["Blend", "Nester"];
         const totalVault = positions.reduce((s, p) => s + p.currentValue, 0);
 
         // Build 30 days of synthetic APY history seeded from position APYs
@@ -183,8 +183,6 @@ export default function PortfolioPage() {
 
         const baseApys: Record<string, number> = {
             Blend: 0.124,
-            Aave: 0.098,
-            Compound: 0.085,
             Nester: nesterApy,
         };
 

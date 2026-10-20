@@ -304,17 +304,9 @@ function YieldScene({ playing }: { playing: boolean }) {
 
   const PROTOCOLS = [
     {
-      name: "Aave",
-      share: "$11,250",
-      pct: 45,
-      apy: "8.4%",
-      util: "78%",
-      logo: "/aave.jpg",
-    },
-    {
       name: "Blend",
-      share: "$7,500",
-      pct: 30,
+      share: "$18,750",
+      pct: 75,
       apy: "11.2%",
       util: "64%",
       logo: "/blend.svg",
@@ -939,8 +931,7 @@ function AutoInvestScene({ playing }: { playing: boolean }) {
   }, [playing]);
 
   const PROTOCOLS = [
-    { id: 'aave', name: 'Aave Pool', apy: '8.4% APY', share: '45%', logo: '/aave.jpg', cx: 80, path: "M 250 193 C 250 230, 80 220, 80 260" },
-    { id: 'blend', name: 'Blend Pool', apy: '11.2% APY', share: '35%', logo: '/blend.svg', cx: 250, path: "M 250 193 L 250 260", primary: true },
+    { id: 'blend', name: 'Blend Pool', apy: '11.2% APY', share: '80%', logo: '/blend.svg', cx: 250, path: "M 250 193 L 250 260", primary: true },
     { id: 'phoenix', name: 'Phoenix Pool', apy: '9.6% APY', share: '20%', logo: '/phoenix.png', cx: 420, path: "M 250 193 C 250 230, 420 220, 420 260" },
   ];
 
@@ -1196,13 +1187,6 @@ function PortfolioScene({ playing }: { playing: boolean }) {
   }, [playing]);
 
   const holdings = [
-    {
-      asset: "Aave (USDC)",
-      balance: "15,200",
-      value: "$15,200",
-      change: "+0.23%",
-      apy: "8.4%",
-    },
     {
       asset: "Blend (USDC)",
       balance: "8,400",

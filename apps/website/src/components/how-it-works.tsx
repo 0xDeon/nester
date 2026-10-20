@@ -13,7 +13,7 @@ const STEPS = [
     step: "01",
     label: "Deposit & Earn",
     headline: "Choose a vault.\nYour money goes\nto work instantly.",
-    body: "Select from four yield strategies. Deposit stablecoins and your funds are automatically split across Aave, Blend & Kamino for optimal, risk-adjusted returns.",
+    body: "Select from four yield strategies. Deposit stablecoins and your funds are deployed to Blend, the lending protocol Nester integrates on Stellar.",
     tab: "Deposit stablecoins and start earning in minutes.",
   },
   {
@@ -193,34 +193,18 @@ function DepositScene({ playing }: { playing: boolean }) {
    PANEL 2 — OPTIMIZE  (node graph: Nester hub → protocol nodes)
    Layout (SVG coords, container 390×310):
      Hub:   cx=195, cy=62  (w=72, so left=159 top=26)
-     Aave:  cx=68,  cy=228 (w=80, so left=28  top=198)
      Blend: cx=195, cy=248 (w=80, so left=155 top=218)
-     Nester(right)→reuse as a third protocol: cx=322, cy=228 (left=282 top=198)
+     Nester(right)→reuse as a second node: cx=322, cy=228 (left=282 top=198)
 ───────────────────────────────────────────────────────────────── */
-
-// Aave ghost logo inline SVG
-const AaveLogo = () => (
-  <svg width="20" height="20" viewBox="0 0 201 305" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M100.5 0L0 305h37.3L100.5 120l63.2 185H201L100.5 0z" fill="#B6509E"/>
-    <path d="M69 215l-18 53h18l9-26 9 26h18l-18-53H69z" fill="#B6509E"/>
-  </svg>
-);
 
 // Node positions — calculated so paths are accurate
 // Hub is at top, nodes sit below it but above the footer (which is ~52px, absolute bottom-0 in 320px container)
 const HUB = { cx: 195, cy: 52, r: 36 };  // bottom of hub = 88
 const NODES = [
   {
-    id: "aave",  label: "Aave",  apy: "9.4%",
-    cx: 68,  cy: 192,    // center of node card
-    left: 18, top: 158,  // card top-left (card ~68px tall, center at +34)
-    logo: <AaveLogo />,
-    bg: "#B6509E18",
-  },
-  {
     id: "blend", label: "Blend", apy: "11.2%",
-    cx: 195, cy: 204,
-    left: 153, top: 170,
+    cx: 110, cy: 192,    // center of node card
+    left: 68, top: 158,  // card top-left (card ~68px tall, center at +34)
     logo: (
       <div className="w-5 h-5 overflow-hidden rounded-sm">
         <Image src="/logos/blend.svg" alt="Blend" width={20} height={20} />
@@ -230,8 +214,8 @@ const NODES = [
   },
   {
     id: "nester-right", label: "Nester", apy: "1.2× APY",
-    cx: 322, cy: 192,
-    left: 288, top: 158,
+    cx: 280, cy: 192,
+    left: 238, top: 158,
     logo: (
       <div className="w-5 h-5 overflow-hidden rounded-sm bg-black flex items-center justify-center">
         <Image src="/logo.png" alt="Nester" width={20} height={20} className="object-cover" />
@@ -538,7 +522,7 @@ function AutoInvestScene({ playing }: { playing: boolean }) {
 ───────────────────────────────────────────────────────────────── */
 const ACTIVITY_FEED = [
   { role: "ai", text: "Auto-invest executed: $200 USDC deposited into Balanced Vault." },
-  { role: "ai", text: "Yield accrued: +$4.12 across Aave and Blend positions." },
+  { role: "ai", text: "Yield accrued: +$4.12 across your Blend position." },
   { role: "ai", text: "Balanced Vault APY updated: 9.2% → 9.5%." },
   { role: "ai", text: "Monthly P&L: +$38.40 (+0.6%) across all positions." },
 ];
@@ -693,7 +677,7 @@ const ARCH_LAYERS = [
   },
   {
     label: "YIELD LAYER",
-    desc: "Auto-diversified across Aave, Blend & Kamino",
+    desc: "Deployed to Blend lending pools on Stellar",
     detail: "9.8% APY",
     color: "#ff5555",
     icon: (

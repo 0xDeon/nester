@@ -1,0 +1,75 @@
+name: Contracts freeze
+
+# Stage 1 scope freeze (docs/LAUNCH_GO_NO_GO.md, "Stage 1 scope freeze").
+#
+# Once the audit-candidate-1 tag exists, a pull request that touches
+# packages/contracts/ must carry the `launch-fix` label and name the audit
+# finding or launch blocker it fixes. Everything else waits until after launch.
+#
+# This workflow deliberately has no `paths:` filter. A required check that is
+# filtered out never reports and blocks the merge; instead the job always runs
+# and decides from the PR's file list, so it can be made a required check.
+#
+# It reads the PR's metadata only and never checks out or runs PR code, so it
+# is safe on pull_request from forks.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  contracts-freeze:
+    name: Contracts freeze
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      FREEZE_TAG: audit-candidate-1
+      REQUIRED_LABEL: launch-fix
+    steps:
+      - name: Enforce the contracts change-control rule
+        env:
+          # Passed through the environment, never interpolated into the script.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+
+          # The freeze begins when the audit candidate is tagged. Before that
+          # the rule is not in force, so contract work proceeds as normal.
+          if ! gh api "repos/${REPO}/git/ref/tags/${FREEZE_TAG}" >/dev/null 2>&1; then
+            echo "Tag ${FREEZE_TAG} does not exist yet; contracts freeze is not in effect."
+            exit 0
+          fi
+
+          touched="$(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename' \
+            | grep '^packages/contracts/' || true)"
+          if [ -z "${touched}" ]; then
+            echo "No files under packages/contracts/ changed; nothing to check."
+            exit 0
+          fi
+
+          echo "This PR touches packages/contracts/ after ${FREEZE_TAG}:"
+          echo "${touched}" | head -20 | sed 's/^/  /'
+
+          failed=0
+
+          case ",${PR_LABELS}," in
+            *",${REQUIRED_LABEL},"*) ;;
+            *)
+              echo "::error title=Contracts are frozen::Add the '${REQUIRED_LABEL}' label. After ${FREEZE_TAG}, only audit fixes and launch-blocker fixes may change packages/contracts/ (docs/LAUNCH_GO_NO_GO.md)."
+              failed=1
+              ;;
+          esac
+
+          if ! printf '%s\n' "${PR_BODY}" | grep -Eiq '^[[:space:]]*(audit )?finding:[[:space:]]*[^[:space:]]+'; then
+            echo "::error title=Missing finding link::Add a line 'Finding: <link or id>' to the PR description naming the audit finding or launch blocker this fixes."
+            failed=1
+          fi
+
+          exit "${failed}"

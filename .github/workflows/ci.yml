@@ -201,6 +201,11 @@ jobs:
       - name: Check OpenAPI spec is up to date
         run: go run ./cmd/openapi-gen -check openapi.yaml
 
+      # The env var reference is generated from the config loader, so an
+      # added, renamed or re-defaulted variable must regenerate the doc.
+      - name: Check API config reference is up to date
+        run: go run ./cmd/config-doc -check ../../docs/api-config.md
+
       - name: Test (unit)
         run: go test -race -timeout 120s -count=1 -short ./...
 

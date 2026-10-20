@@ -16,7 +16,7 @@
     --popover-foreground: 240 10% 10%;
 
     --primary: 255 60% 60%;
-    /* Aave-like Purple/Pink Gradient base */
+    /* Purple/Pink Gradient base */
     --primary-foreground: 0 0% 100%;
 
     --secondary: 240 4.8% 95.9%;
@@ -37,7 +37,7 @@
 
     --radius: 0.75rem;
 
-    /* Custom Aave Gradients */
+    /* Custom Gradients */
     --gradient-brand: linear-gradient(135deg, #B6509E 0%, #2EBAC6 100%);
   }
 

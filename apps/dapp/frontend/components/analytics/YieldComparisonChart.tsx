@@ -42,8 +42,6 @@ type Period = (typeof PERIODS)[number];
 
 const PROTOCOL_COLORS: Record<string, string> = {
   Blend: "#6366f1",
-  Aave: "#8b5cf6",
-  Compound: "#ec4899",
   Nester: "#000000",
 };
 
