@@ -10,3 +10,20 @@ groups:
         annotations:
           summary: "Stellar operational account balance is below the safe reserve threshold"
           description: "The mainnet operational account XLM balance is {{ $value }}, which is below the required safe reserve threshold. Trustlines and sponsorships may fail."
+
+      # Predictive counterpart to the rule above (nester docs/KEEPER_RENT_COST_MODEL.md
+      # §4): extrapolates the trailing 7-day balance trend and pages 30 days
+      # before the keeper account is projected to hit zero, instead of only
+      # at the point it has already crossed the safe-reserve floor.
+      - alert: StellarOperationalAccountRunwayLow
+        expr: |
+          predict_linear(nester_stellar_account_balance_xlm[7d], 30 * 24 * 3600) < 0
+          and
+          nester_stellar_account_balance_xlm > 0
+        for: 1h
+        labels:
+          severity: warning
+          network: mainnet
+        annotations:
+          summary: "Keeper account balance is on track to run out within 30 days"
+          description: "{{ $labels.account_name }} account is projected to hit zero XLM within 30 days at its current burn rate (current balance {{ $value }}). Top up before StellarOperationalAccountLowReserve fires."
