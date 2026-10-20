@@ -1,23 +1,18 @@
 /**
- * Canonical client-side token storage. This is the single place that reads
- * or writes auth state in localStorage — every API module should import
- * from here instead of touching localStorage directly.
+ * Canonical client-side session storage. The short-lived access token lives
+ * in module memory only, so it never touches localStorage (or any other
+ * JS-readable persistent storage) where XSS, extensions or a compromised
+ * dependency could lift it. After a reload the token is recovered through the
+ * httpOnly refresh cookie (/auth/refresh); see components/auth-provider.tsx.
  *
- * Historically the access token was written under "nester_auth_token" (by
- * auth-provider.tsx) while most API modules read from "nester_token" — a key
- * nothing ever wrote — so outgoing requests never actually carried a real
- * Authorization header. Consolidating on one module fixes that for good.
- *
- * The refresh token is NOT stored here. It never touches localStorage or any
- * other JS-readable storage — the server sets it as an httpOnly, Secure
- * cookie (scoped to /api/v1/auth) on /auth/verify and rotates it on every
- * /auth/refresh. This means an XSS on the frontend can steal the short-lived
- * access token at worst, not the long-lived refresh token. The browser
- * attaches the cookie automatically; the client only needs `credentials:
- * "include"` on the fetch calls that touch it (see lib/api/client.ts).
+ * The refresh token is NOT stored here either. The server sets it as an
+ * httpOnly, Secure cookie (scoped to /api/v1/auth) on /auth/verify and rotates
+ * it on every /auth/refresh. The browser attaches the cookie automatically;
+ * the client only needs `credentials: "include"` on the fetch calls that touch
+ * it (see lib/api/client.ts).
  */
 
-const ACCESS_TOKEN_KEY = "nester_auth_token";
+const LEGACY_ACCESS_TOKEN_KEY = "nester_auth_token";
 const USER_ID_KEY = "nester_user_id";
 const DEVICE_FINGERPRINT_KEY = "nester_device_fingerprint";
 
@@ -25,9 +20,27 @@ function isBrowser(): boolean {
   return typeof window !== "undefined";
 }
 
+let accessToken = "";
+const listeners = new Set<(token: string) => void>();
+
+// Tokens written by earlier versions must not linger in localStorage.
+if (isBrowser()) {
+  window.localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY);
+}
+
+function notify(): void {
+  listeners.forEach((listener) => listener(accessToken));
+}
+
+export function subscribeAccessToken(listener: (token: string) => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 export function getAccessToken(): string {
-  if (!isBrowser()) return "";
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY) ?? "";
+  return accessToken;
 }
 
 export function getUserId(): string | null {
@@ -44,14 +57,15 @@ export function setUserId(id: string | null): void {
   }
 }
 
-export function setAccessToken(accessToken: string): void {
-  if (!isBrowser()) return;
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+export function setAccessToken(token: string): void {
+  accessToken = token;
+  notify();
 }
 
 export function clearTokens(): void {
+  accessToken = "";
+  notify();
   if (!isBrowser()) return;
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
   window.localStorage.removeItem(USER_ID_KEY);
 }
 
@@ -79,5 +93,4 @@ function generateFingerprint(): string {
 }
 
 /** Storage key exported for the cross-tab `storage` event listener. */
-export const ACCESS_TOKEN_STORAGE_KEY = ACCESS_TOKEN_KEY;
 export const USER_ID_STORAGE_KEY = USER_ID_KEY;
