@@ -21,6 +21,10 @@ import { useWallet } from "@/components/wallet-provider";
 import { vaultsApi } from "@/lib/api/vaults";
 import { cn } from "@/lib/utils";
 import { useOfflineStatus } from "@/hooks/useOfflineStatus";
+import { useSlippage } from "@/hooks/useSlippage";
+import { useQuoteTimestamp } from "@/hooks/useQuoteTimestamp";
+import { SlippageControl } from "@/components/slippage-control";
+import { applySlippageToAmount, minReceivedUnits, resolveFreshQuote } from "@/lib/slippage";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { TransactionAnnouncer } from "@/components/vault/transactionAnnouncer";
 import {
@@ -177,6 +181,8 @@ export function WithdrawModal({ open, onClose, position }: WithdrawModalProps) {
     () => (position ? getWithdrawalQuote(position.id, amount) : null),
     [amount, getWithdrawalQuote, position]
   );
+  const quotedAt = useQuoteTimestamp(quote);
+  const { bps: slippageBps, setBps: setSlippageBps } = useSlippage();
 
   const validationError = useMemo(() => {
     if (!amount) return null;
@@ -216,18 +222,26 @@ export function WithdrawModal({ open, onClose, position }: WithdrawModalProps) {
       // batches it with setState("success") into one render, so the user
       // never sees "waiting for confirmation".
       setState("pending");
+      const { value: freshQuote } = await resolveFreshQuote(
+        { value: quote, fetchedAt: quotedAt.current },
+        () => {
+          const next = getWithdrawalQuote(position.id, amount);
+          if (!next) throw new Error("Unable to refresh the withdrawal quote. Please try again.");
+          return next;
+        }
+      );
       const txReceipt = await executeVaultWithdraw({
         walletAddress: address,
         vaultId: position.vaultId,
         contractId: vaultDef?.contractAddress || "",
         asset: position.asset?.toUpperCase() === "XLM" ? "XLM" : "USDC",
-        shares: quote.sharesBurned,
-        minAssetsOut: quote.netAmount,
+        shares: freshQuote.sharesBurned,
+        minAssetsOut: applySlippageToAmount(freshQuote.netAmount, slippageBps),
       });
 
       const result = recordWithdrawal({
         positionId: position.id,
-        grossAmount: quote.grossAmount,
+        grossAmount: freshQuote.grossAmount,
         txHash: txReceipt.txHash,
         isOnChain: true,
       });
@@ -242,7 +256,7 @@ export function WithdrawModal({ open, onClose, position }: WithdrawModalProps) {
         await vaultsApi.registerTransaction({
           vault_id: position.vaultId,
           type: "withdrawal",
-          amount: String(quote.grossAmount),
+          amount: String(freshQuote.grossAmount),
           currency: position.asset?.toUpperCase() === "XLM" ? "XLM" : "USDC",
           tx_hash: txReceipt.txHash,
         });
@@ -370,12 +384,19 @@ export function WithdrawModal({ open, onClose, position }: WithdrawModalProps) {
                 )}
               </div>
 
+              <SlippageControl
+                bps={slippageBps}
+                onChange={setSlippageBps}
+                disabled={state !== "input" && state !== "error"}
+              />
+
               {/* Quote preview */}
               <div className="mt-4 space-y-2.5 rounded-2xl border border-border bg-secondary/20 p-4 text-sm">
                 {[
                   { label: "Gross proceeds", value: `${formatCurrency(quote?.grossAmount ?? 0)} ${position.asset ?? "USDC"}` },
                   { label: "Early exit penalty", value: `${formatCurrency(quote ? quote.grossAmount - quote.netAmount : 0)} ${position.asset ?? "USDC"}` },
                   { label: "Net to wallet", value: `${formatCurrency(quote?.netAmount ?? 0)} ${position.asset ?? "USDC"}`, highlight: true },
+                  { label: "Minimum received", value: `${formatCurrency(quote ? minReceivedUnits(quote.netAmount, slippageBps) : 0)} ${position.asset ?? "USDC"}` },
                   { label: "Shares burned", value: formatCurrency(quote?.sharesBurned ?? 0) },
                 ].map(({ label, value, highlight }) => (
                   <div key={label} className="flex items-center justify-between">

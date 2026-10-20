@@ -19,6 +19,8 @@ vi.mock("@/components/portfolio-provider", () => ({
 
 vi.mock("@/lib/stellar/transaction", () => ({
   executeVaultDeposit: vi.fn(),
+  resolveDepositMinSharesOut: vi.fn(),
+  previewDeposit: vi.fn().mockResolvedValue({ sharesExpected: BigInt(0), available: false }),
   UserRejectedError: class UserRejectedError extends Error {},
   TransactionFailedError: class TransactionFailedError extends Error {},
   TransactionTimeoutError: class TransactionTimeoutError extends Error {},

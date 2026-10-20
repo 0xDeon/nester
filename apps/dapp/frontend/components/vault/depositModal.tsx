@@ -17,12 +17,17 @@ import { usePortfolio } from "@/components/portfolio-provider";
 import { useWallet } from "@/components/wallet-provider";
 import { cn } from "@/lib/utils";
 import { useOfflineStatus } from "@/hooks/useOfflineStatus";
+import { useDepositPreview } from "@/hooks/useDepositPreview";
+import { useSlippage } from "@/hooks/useSlippage";
+import { SlippageControl } from "@/components/slippage-control";
+import { applySlippage } from "@/lib/slippage";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { TransactionAnnouncer } from "@/components/vault/transactionAnnouncer";
 import type { Vault as VaultDefinition, MarketStrategy } from "@/lib/types/vault";
 import { vaultsApi } from "@/lib/api/vaults";
 import {
   executeVaultDeposit,
+  resolveDepositMinSharesOut,
   UserRejectedError,
   TransactionFailedError,
   TransactionTimeoutError,
@@ -260,6 +265,30 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
   const canSubmit =
     !!vault && !!address && amount > 0 && !validationError && state === "input" && !isOffline;
 
+  const { bps: slippageBps, setBps: setSlippageBps } = useSlippage();
+  const previewParams = useMemo(() => {
+    if (!vault || !address || amount <= 0 || !/^C[A-Z0-9]{55}$/.test(vault.contractAddress ?? "")) {
+      return null;
+    }
+    return {
+      walletAddress: address,
+      contractId: vault.contractAddress as string,
+      amount: amountInput.trim(),
+    };
+  }, [vault, address, amount, amountInput]);
+  const { preview: depositPreview } = useDepositPreview(
+    previewParams,
+    open && state === "input" && !validationError
+  );
+  const sharesExpected =
+    depositPreview?.available && depositPreview.sharesExpected > BigInt(0)
+      ? Number(depositPreview.sharesExpected) / 1e7
+      : amount;
+  const minSharesReceived =
+    depositPreview?.available && depositPreview.sharesExpected > BigInt(0)
+      ? Number(applySlippage(depositPreview.sharesExpected, slippageBps)) / 1e7
+      : null;
+
   const effectiveApy = selectedStrategy ? selectedStrategy.apy / 100 : (meta ? meta.apy : 0);
   const estimatedYield = amount * effectiveApy;
 
@@ -305,12 +334,23 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
 
     try {
       setState("pending");
-      const txReceipt = await executeVaultDeposit({
+      const quoteParams = {
         walletAddress: address,
-        vaultId: vault.id,
         contractId: vault.contractAddress,
-        asset: selectedAsset,
         amount: amountInput.trim(),
+      };
+      const { minSharesOut } = await resolveDepositMinSharesOut(
+        quoteParams,
+        slippageBps,
+        depositPreview?.available
+          ? { value: depositPreview.sharesExpected, fetchedAt: depositPreview.fetchedAt }
+          : null
+      );
+      const txReceipt = await executeVaultDeposit({
+        ...quoteParams,
+        vaultId: vault.id,
+        asset: selectedAsset,
+        minSharesOut,
       });
 
       setReceipt(txReceipt);
@@ -503,6 +543,12 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                 )}
               </div>
 
+              <SlippageControl
+                bps={slippageBps}
+                onChange={setSlippageBps}
+                disabled={state !== "input" && state !== "error"}
+              />
+
               {/* Preview */}
               <div className="mt-5 space-y-3 rounded-2xl border border-border bg-secondary/30 p-4">
                 {[
@@ -516,7 +562,11 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                   },
                   {
                     label: "nVault shares to receive",
-                    value: formatCurrency(amount),
+                    value: formatCurrency(sharesExpected),
+                  },
+                  {
+                    label: "Minimum received",
+                    value: minSharesReceived !== null ? `${formatCurrency(minSharesReceived)} nVault shares` : "—",
                   },
                   {
                     label: "Lock period",

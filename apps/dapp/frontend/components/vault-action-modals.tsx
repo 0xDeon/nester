@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { useStellarFeeEstimate } from "@/hooks/useStellarFeeEstimate";
 import { useDepositPreview } from "@/hooks/useDepositPreview";
+import { useSlippage } from "@/hooks/useSlippage";
+import { useQuoteTimestamp } from "@/hooks/useQuoteTimestamp";
+import { SlippageControl } from "@/components/slippage-control";
+import { applySlippage, applySlippageToAmount, minReceivedUnits, resolveFreshQuote } from "@/lib/slippage";
 import { ReportProblemButton } from "@/components/report-problem-button";
 import { NetworkFeeDisplay } from "@/components/stellar/NetworkFeeEstimate";
 import { useTokenPrices } from "@/hooks/useTokenPrices";
@@ -31,6 +35,7 @@ import {
 import {
     buildDepositTransaction,
     buildWithdrawTransaction,
+    resolveDepositMinSharesOut,
     signTransaction,
     submitTransaction,
     UserRejectedError,
@@ -206,6 +211,12 @@ export function DepositModal({
         open && state === "input" && amount > 0
     );
 
+    const { bps: slippageBps, setBps: setSlippageBps } = useSlippage();
+    const minSharesReceived =
+        depositPreview?.available && depositPreview.sharesExpected > BigInt(0)
+            ? Number(formatStroopsToDisplay(applySlippage(depositPreview.sharesExpected, slippageBps), 6))
+            : null;
+
     const canSubmit = !!vault && !!address && isValid && amount > 0;
     const estimatedYield = vault ? amount * vault.apy : 0;
     const sharesReceived =
@@ -241,14 +252,24 @@ export function DepositModal({
                     : vault.contractAddress) ??
                 requireContractId(selectedAsset === "XLM" ? "vaultXlm" : "vault");
 
+            // Pass the exact stroop value. Routing through the display
+            // float and letting the builder do Math.round(x * 1e7)
+            // reintroduces the precision loss this parsing work exists
+            // to remove.
+            const depositAmount = amountStroops ?? BigInt(0);
+            const { minSharesOut } = await resolveDepositMinSharesOut(
+                { walletAddress: address, contractId, amount: depositAmount },
+                slippageBps,
+                depositPreview?.available
+                    ? { value: depositPreview.sharesExpected, fetchedAt: depositPreview.fetchedAt }
+                    : null
+            );
+
             const { xdr } = await buildDepositTransaction({
                 walletAddress: address,
                 contractId,
-                // Pass the exact stroop value. Routing through the display
-                // float and letting the builder do Math.round(x * 1e7)
-                // reintroduces the precision loss this parsing work exists
-                // to remove.
-                amount: amountStroops ?? BigInt(0),
+                amount: depositAmount,
+                minSharesOut,
             });
             const signedXdr = await signTransaction(xdr);
 
@@ -431,6 +452,12 @@ export function DepositModal({
                                 xlmUsdPrice={tokenPrices.XLM}
                             />
 
+                            <SlippageControl
+                                bps={slippageBps}
+                                onChange={setSlippageBps}
+                                disabled={state === "confirming" || state === "submitting"}
+                            />
+
                             <div className="mt-6 space-y-3 rounded-2xl border border-border bg-secondary/30 p-4">
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-muted-foreground">Estimated annual yield</span>
@@ -442,6 +469,12 @@ export function DepositModal({
                                     <span className="text-muted-foreground">nVault shares to receive</span>
                                     <span className="font-medium text-foreground">
                                         {formatCurrency(sharesReceived)}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-muted-foreground">Minimum received</span>
+                                    <span className="font-medium text-foreground">
+                                        {minSharesReceived !== null ? `${formatCurrency(minSharesReceived)} nVault shares` : "—"}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
@@ -683,6 +716,8 @@ export function WithdrawModal({
         () => (position ? getWithdrawalQuote(position.id, amount) : null),
         [amount, getWithdrawalQuote, position]
     );
+    const quotedAt = useQuoteTimestamp(quote);
+    const { bps: slippageBps, setBps: setSlippageBps } = useSlippage();
 
     const withdrawFeeParams = useMemo(() => {
         if (!position || !address || amount <= 0 || !quote) return null;
@@ -740,11 +775,20 @@ export function WithdrawModal({
                 ? (vaultDef?.contractXlmAddress || vaultDef?.contractAddress || "")
                 : (vaultDef?.contractAddress || "");
 
+            const { value: freshQuote } = await resolveFreshQuote(
+                { value: quote, fetchedAt: quotedAt.current },
+                () => {
+                    const next = getWithdrawalQuote(position.id, amount);
+                    if (!next) throw new Error("Unable to refresh the withdrawal quote. Please try again.");
+                    return next;
+                }
+            );
+
             const { xdr } = await buildWithdrawTransaction({
                 walletAddress: address,
                 contractId,
-                shares: quote.sharesBurned,
-                minAssetsOut: quote.netAmount,
+                shares: freshQuote.sharesBurned,
+                minAssetsOut: applySlippageToAmount(freshQuote.netAmount, slippageBps),
             });
             const signedXdr = await signTransaction(xdr);
 
@@ -913,12 +957,19 @@ export function WithdrawModal({
                         xlmUsdPrice={tokenPrices.XLM}
                     />
 
+                    <SlippageControl
+                        bps={slippageBps}
+                        onChange={setSlippageBps}
+                        disabled={state === "confirming" || state === "submitting"}
+                    />
+
                     {/* Breakdown */}
                     <div className="space-y-2.5 rounded-2xl border border-border bg-white dark:bg-[#100F0F] p-4 text-sm">
                         {[
                             { label: "Gross proceeds", value: `${formatCurrency(quote?.grossAmount ?? 0)} ${position.asset ?? "USDC"}` },
                             { label: "Early exit penalty", value: `${formatCurrency(quote ? quote.grossAmount - quote.netAmount : 0)} ${position.asset ?? "USDC"}` },
                             { label: "Net to wallet", value: `${formatCurrency(quote?.netAmount ?? 0)} ${position.asset ?? "USDC"}`, highlight: true },
+                            { label: "Minimum received", value: `${formatCurrency(quote ? minReceivedUnits(quote.netAmount, slippageBps) : 0)} ${position.asset ?? "USDC"}` },
                             { label: "Shares burned", value: formatCurrency(quote?.sharesBurned ?? 0) },
                         ].map(({ label, value, highlight }) => (
                             <div key={label} className="flex items-center justify-between">
