@@ -29,6 +29,7 @@ import {
     type PortfolioPosition,
 } from "@/components/portfolio-provider";
 import {
+    assertWalletOnDappNetwork,
     buildDepositTransaction,
     buildWithdrawTransaction,
     signTransaction,
@@ -240,6 +241,8 @@ export function DepositModal({
                     ? vault.contractXlmAddress || vault.contractAddress
                     : vault.contractAddress) ??
                 requireContractId(selectedAsset === "XLM" ? "vaultXlm" : "vault");
+
+            await assertWalletOnDappNetwork();
 
             const { xdr } = await buildDepositTransaction({
                 walletAddress: address,
@@ -740,6 +743,8 @@ export function WithdrawModal({
                 ? (vaultDef?.contractXlmAddress || vaultDef?.contractAddress || "")
                 : (vaultDef?.contractAddress || "");
 
+            await assertWalletOnDappNetwork();
+
             const { xdr } = await buildWithdrawTransaction({
                 walletAddress: address,
                 contractId,
@@ -1116,6 +1121,8 @@ export function TransferModal({
             const contractId = position.asset === "XLM"
                 ? (srcVaultDef?.contractXlmAddress || srcVaultDef?.contractAddress || "")
                 : (srcVaultDef?.contractAddress || "");
+
+            await assertWalletOnDappNetwork();
 
             const { xdr } = await buildWithdrawTransaction({
                 walletAddress: address ?? "",
