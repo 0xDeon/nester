@@ -1,4 +1,4 @@
-.PHONY: build build-adapters test integration-test fmt clippy clean help deploy-testnet
+.PHONY: build build-adapters test integration-test fmt clippy clean help deploy-testnet deploy-mainnet
 
 # Yield source adapters (#812). Each external protocol gets one small adapter
 # implementing nester_common::adapters::YieldAdapter. Adding a third protocol
@@ -16,6 +16,7 @@ help:
 	@echo "make clippy           - Run clippy linter (must pass clean)"
 	@echo "make clean            - Remove build artifacts"
 	@echo "make deploy-testnet   - Deploy contracts to Stellar testnet"
+	@echo "make deploy-mainnet   - Deploy contracts to Stellar mainnet (see scripts/deploy-mainnet.sh)"
 
 build:
 	@echo "Building all Soroban contracts to WASM..."
@@ -67,3 +68,6 @@ clean:
 
 deploy-testnet:
 	@bash scripts/deploy-testnet.sh
+
+deploy-mainnet:
+	@bash scripts/deploy-mainnet.sh
