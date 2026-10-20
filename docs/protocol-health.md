@@ -93,3 +93,56 @@ of an exploit or a bug rather than gradual outflow.
   reading can be a bad data point, so moving funds stays with the scored,
   multi-indicator severe path or an operator decision.
 
+## Pause modes: what still works
+
+The launch plan is "pause deposits, keep withdrawals open". That only holds if
+no withdraw path shares a guard with deposits, so each way the system can stop
+is pinned by a test that asserts which operations still succeed. A pause that
+traps users in exactly the incident they want out of is a defect, not a safety
+control.
+
+### On-chain (vault contract)
+
+Test: `pause_mode_matrix_matches_the_documented_table` in
+`packages/contracts/contracts/vault/src/test.rs` (module `pause_matrix`). The
+property `prop_withdrawals_stay_open_while_only_deposits_are_halted` covers the
+deposit-only row across position sizes and withdrawn fractions.
+
+✓ = succeeds, ✗ = rejected.
+
+| Mode (how it is entered) | `deposit` | `withdraw` | `emergency_withdraw` | `harvest` | `unlock_position` |
+| --- | --- | --- | --- | --- | --- |
+| Normal (control) | ✓ | ✓ | ✗ | ✓ | ✓ |
+| Deposit-only breaker (`guardian_halt_deposits`, severity `DepositsHalted`) | ✗ | ✓ | ✗ | ✓ | ✓ |
+| Per-vault pause (`pause`) | ✗ | ✗ | ✓ | ✗ | ✓ |
+| Full-halt breaker (`guardian_trip_breaker`, severity `FullHalt`) | ✗ | ✗ | ✓ | ✗ | ✓ |
+
+Reading the table:
+
+- **Deposit-only breaker** is the mode to use when new money should stop but
+  users must be able to leave. `withdraw` is guarded by
+  `breaker::require_withdrawals_allowed` (blocks only at `FullHalt`), not by
+  `breaker::require_deposits_allowed`, and the vault status stays `Active`.
+- **Per-vault pause and full halt** close the normal `withdraw` path on
+  purpose, and open `emergency_withdraw` as the exit. Anyone who needs to
+  leave in these modes uses it.
+- **`emergency_withdraw` is paused-only.** It is rejected in the first two rows
+  because the normal `withdraw` is still open there.
+- **`unlock_position` is never blocked.** It only moves already-owned shares
+  from a matured lock to the flexible balance and moves no assets.
+
+If a row changes, update the `MATRIX` constant and the table comment in the
+test module together with this table.
+
+### Off-chain (API global money-path switch)
+
+The global switch (`deposits_paused`, `withdrawals_paused`) gates the API's
+deposit and withdrawal paths and is independent per flag. Test:
+`TestGlobalPauseMatrix` in `apps/api/internal/service/vault_money_path_pause_test.go`.
+It does not gate the contract calls a user signs directly, so
+`harvest` and `unlock_position` are not affected by it.
+
+| Switch engaged | API deposit | API withdrawal | API rebalance | API emergency withdraw |
+| --- | --- | --- | --- | --- |
+| `deposits_paused` only | ✗ | ✓ | ✓ | ✓ |
+| `withdrawals_paused` only | ✓ | ✗ | ✗ | ✓ |

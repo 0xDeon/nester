@@ -116,3 +116,55 @@ func TestPausedWithdrawalDoesNotBlockEmergencyWithdraw(t *testing.T) {
 		t.Fatal("emergency withdraw must not be blocked by the pause switch")
 	}
 }
+
+// The global switch's full outcome table (docs/protocol-health.md, "Pause
+// modes: what still works"). Each switch is independent, and neither one
+// reaches the emergency exit.
+func TestGlobalPauseMatrix(t *testing.T) {
+	cases := []struct {
+		name              string
+		blocked           moneypath.Operation
+		depositRefused    bool
+		withdrawalRefused bool
+		rebalanceRefused  bool
+	}{
+		{"deposits paused", moneypath.OperationDeposit, true, false, false},
+		{"withdrawals paused", moneypath.OperationWithdrawal, false, true, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewVaultService(nil)
+			svc.SetMoneyPathSwitches(pausedGate{blocked: tc.blocked})
+			ctx := context.Background()
+
+			refused := func(err error) bool { return errors.Is(err, moneypath.ErrPaused) }
+
+			if got := refused(svc.ensureMoneyPathAllowed(ctx, moneypath.OperationDeposit)); got != tc.depositRefused {
+				t.Errorf("deposit refused = %v, want %v", got, tc.depositRefused)
+			}
+			if got := refused(svc.ensureMoneyPathAllowed(ctx, moneypath.OperationWithdrawal)); got != tc.withdrawalRefused {
+				t.Errorf("withdrawal refused = %v, want %v", got, tc.withdrawalRefused)
+			}
+
+			if tc.rebalanceRefused {
+				_, err := svc.RebalancePosition(ctx, RebalancePositionInput{
+					VaultID:      uuid.New(),
+					UserID:       uuid.New(),
+					Amount:       decimal.NewFromInt(10),
+					FromProtocol: "a",
+					ToProtocol:   "b",
+				})
+				if !refused(err) {
+					t.Errorf("rebalance: got %v, want moneypath.ErrPaused", err)
+				}
+			}
+
+			// The emergency exit is never behind either switch.
+			_, err := svc.EmergencyWithdraw(ctx, EmergencyWithdrawInput{VaultID: uuid.Nil})
+			if refused(err) {
+				t.Error("emergency withdraw must not be refused by a global pause")
+			}
+		})
+	}
+}
