@@ -32,6 +32,12 @@ export const getCurrentNetwork = () => {
   return savedNetwork ? NETWORKS[savedNetwork] : DEFAULT_NETWORK;
 };
 
+/**
+ * Validity window for built transactions. Hardware wallets, WalletConnect and
+ * mobile signers routinely need well over 30s, so keep this generous.
+ */
+export const TX_TIMEOUT_SECONDS = 180;
+
 // Contract addresses come from lib/contracts.ts, which validates them and
 // never substitutes "" for a missing value (#1094). These resolve to null when
 // unconfigured; a caller that must have one calls requireContractId instead.
@@ -150,6 +156,27 @@ export class TransactionTimeoutError extends Error {
   constructor() {
     super("Transaction timed out waiting for on-chain confirmation.");
     this.name = "TransactionTimeoutError";
+  }
+}
+
+/**
+ * Thrown when the wallet is on a different network than the dapp.
+ */
+export class WalletNetworkMismatchError extends Error {
+  constructor(public readonly expectedNetworkName: string) {
+    super(`Switch your wallet to ${expectedNetworkName}`);
+    this.name = "WalletNetworkMismatchError";
+  }
+}
+
+/**
+ * Thrown when the transaction's time bounds elapsed before it could be
+ * submitted (e.g. slow hardware/mobile signing, or a txTooLate rejection).
+ */
+export class TransactionExpiredError extends Error {
+  constructor() {
+    super("Signing took too long, try again");
+    this.name = "TransactionExpiredError";
   }
 }
 
@@ -298,7 +325,7 @@ export async function buildDepositTransaction(
         nativeToScVal(minSharesOut, { type: "i128" })
       )
     )
-    .setTimeout(30)
+    .setTimeout(TX_TIMEOUT_SECONDS)
     .build();
 
   // Simulate to populate the transaction's footprint (Soroban requirement)
@@ -353,7 +380,7 @@ export async function buildWithdrawTransaction(
         nativeToScVal(minAssetsStroops, { type: "i128" })
       )
     )
-    .setTimeout(30)
+    .setTimeout(TX_TIMEOUT_SECONDS)
     .build();
 
   const sim = await server.simulateTransaction(tx);
@@ -372,12 +399,72 @@ export async function buildWithdrawTransaction(
 // ── Wallet signing ────────────────────────────────────────────────────────────
 
 /**
+ * Compare the connected wallet's network with the dapp's selected network.
+ * Wallets that cannot report their network are not blocked.
+ *
+ * @throws {WalletNetworkMismatchError} on a definite passphrase mismatch.
+ */
+export async function assertWalletOnDappNetwork(): Promise<void> {
+  const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit");
+
+  const walletModule = StellarWalletsKit.selectedModule;
+  if (!walletModule || typeof walletModule.getNetwork !== "function") return;
+
+  let walletPassphrase: string | undefined;
+  try {
+    walletPassphrase = (await walletModule.getNetwork())?.networkPassphrase;
+  } catch {
+    return;
+  }
+
+  const network = getCurrentNetwork();
+  if (walletPassphrase && walletPassphrase !== network.networkPassphrase) {
+    throw new WalletNetworkMismatchError(network.name);
+  }
+}
+
+/**
+ * Sign a freshly built transaction. If the signer takes so long that the
+ * transaction's time bounds have passed, rebuild (and re-simulate) once and ask
+ * for a new signature.
+ *
+ * @throws {TransactionExpiredError} if the rebuilt transaction also expires.
+ */
+export async function signWithExpiryRebuild(
+  build: () => Promise<{ xdr: string; transaction: { timeBounds?: { maxTime: string } } }>,
+  sign: (xdr: string) => Promise<string>
+): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const built = await build();
+    const signed = await sign(built.xdr);
+    const maxTime = Number(built.transaction.timeBounds?.maxTime ?? 0);
+    if (!maxTime || Math.floor(Date.now() / 1000) < maxTime) return signed;
+  }
+  throw new TransactionExpiredError();
+}
+
+function isTxTooLate(errorResult: unknown): boolean {
+  try {
+    const code = (
+      errorResult as { result: () => { switch: () => { name: string } } }
+    )
+      .result()
+      .switch().name;
+    return code === "txTooLate";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Request the user to sign a transaction via stellar-wallets-kit.
  * Returns the signed XDR string.
  *
  * @throws {UserRejectedError} if the user dismisses the wallet popup.
  */
 export async function signTransaction(txXdr: string): Promise<string> {
+  await assertWalletOnDappNetwork();
+
   const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit");
 
   const walletModule = StellarWalletsKit.selectedModule;
@@ -473,6 +560,9 @@ export async function submitTransaction(
   const sendResult = await server.sendTransaction(tx);
 
   if (sendResult.status === "ERROR") {
+    if (isTxTooLate(sendResult.errorResult)) {
+      throw new TransactionExpiredError();
+    }
     throw new TransactionFailedError(
       sendResult.errorResult?.toXDR("base64") ?? "unknown error"
     );
@@ -549,6 +639,11 @@ export async function executeVaultDeposit(params: {
 
   const { xdr } = await buildDepositTransaction({ walletAddress, contractId, amount, minSharesOut });
   const signedXdr = await signTransaction(xdr);
+  await assertWalletOnDappNetwork();
+  const signedXdr = await signWithExpiryRebuild(
+    () => buildDepositTransaction({ walletAddress, contractId, amount }),
+    signTransaction
+  );
   return submitTransaction(signedXdr);
 }
 
@@ -566,8 +661,11 @@ export async function executeVaultWithdraw(params: {
     throw new Error("Vault is not yet live. Withdrawals are currently disabled.");
   }
 
-  const { xdr } = await buildWithdrawTransaction({ walletAddress, contractId, shares, minAssetsOut });
-  const signedXdr = await signTransaction(xdr);
+  await assertWalletOnDappNetwork();
+  const signedXdr = await signWithExpiryRebuild(
+    () => buildWithdrawTransaction({ walletAddress, contractId, shares, minAssetsOut }),
+    signTransaction
+  );
   return submitTransaction(signedXdr);
 }
 
