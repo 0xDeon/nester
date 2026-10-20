@@ -25,6 +25,36 @@ to be recorded against.
 | Full pre-launch verification checklist executed | #459 (Trident) | | `docs/LAUNCH_CHECKLIST.md` (Trident repo), all rows Pass | |
 | Rollback rehearsed end-to-end with wall-clock time recorded | #460 (Trident) | | `docs/ROLLBACK_RUNBOOK.md` (Trident repo) rehearsal section completed | |
 
+## Stage 1 scope freeze
+
+Every contract change made after the audit candidate was cut invalidates part
+of the audit, so scope is frozen for Stage 1.
+
+- **Freeze date: 2026-10-30.** On this date the audit candidate commit is
+  tagged `audit-candidate-1`. Feature work (savings goal features, rewards,
+  referral, and anything else new) is not part of Stage 1 and does not merge
+  to `packages/contracts/` after this point. It resumes after launch.
+- **Change-control rule.** After the `audit-candidate-1` tag exists, a change
+  to `packages/contracts/` may merge only if it is one of:
+  1. a fix for a finding in the audit report, or
+  2. a fix for a launch blocker recorded in the checklist above.
+- **Every such PR must**
+  - carry the `launch-fix` label, and
+  - name the finding or blocker it fixes on a line of its description
+    starting `Finding:` (a link to the audit finding or the checklist
+    row/issue).
+- **Anything else** (refactors, new features, test-only cleanups in the
+  contracts crate, dependency bumps) waits until after launch. If it cannot,
+  it is a scope change: it needs a go/no-go owner's written approval in the PR
+  and the auditors told which files moved.
+- **Enforcement.** `.github/workflows/contracts-freeze.yml` runs on every pull
+  request. It does nothing until the `audit-candidate-1` tag exists, then fails
+  any PR that touches `packages/contracts/` without the `launch-fix` label and
+  a `Finding:` line. Add the "Contracts freeze" job to the required status
+  checks on `dev` and `main` so it blocks the merge button.
+- **Lifting the freeze.** The freeze ends at mainnet launch. Delete the
+  workflow in the same PR that records the launch in this document.
+
 ## No-go criteria
 
 - Any row above is unresolved or has no assigned owner.
