@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import Script from "next/script";
 import { Inter } from "next/font/google";
 import { PortfolioProvider } from "@/components/portfolio-provider";
@@ -61,16 +62,21 @@ const themeInitScript = `
 })();
 `;
 
-export default function RootLayout({
+export default async function RootLayout({
     children,
 }: Readonly<{
     children: React.ReactNode;
 }>) {
+    // Reading the per-request nonce opts the tree into dynamic rendering, which
+    // the nonce-based CSP in proxy.ts requires: a prerendered page cannot carry
+    // a nonce that changes on every request.
+    const nonce = (await headers()).get("x-nonce") ?? undefined;
     return (
         <html lang="en" suppressHydrationWarning>
             <head>
                 <Script
                     id="theme-init"
+                    nonce={nonce}
                     strategy="beforeInteractive"
                     dangerouslySetInnerHTML={{ __html: themeInitScript }}
                 />

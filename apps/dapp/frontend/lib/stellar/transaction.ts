@@ -13,6 +13,7 @@ import { NETWORKS, DEFAULT_NETWORK } from "@/lib/networks";
 import { readNetworkId } from "@/lib/storageKeys";
 import { assertValidContractId, getContractId } from "@/lib/contracts";
 import { depositAmountToStroops } from "@/lib/decimal";
+import { applySlippage, resolveFreshQuote, type TimedQuote } from "@/lib/slippage";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -58,7 +59,14 @@ export interface DepositParams {
    * at most 7 decimals). Numbers are not accepted: float * 1e7 misrounds.
    */
   amount: bigint | string;
+  /**
+   * Minimum vault shares the user accepts (slippage guard), in the contract's
+   * share units. Derived from preview_deposit minus the user's tolerance.
+   */
+  minSharesOut: bigint;
 }
+
+export type DepositQuoteParams = Omit<DepositParams, "minSharesOut">;
 
 export interface WithdrawParams {
   walletAddress: string;
@@ -197,10 +205,13 @@ function stroopsToXlm(stroops: bigint): number {
  * Estimate Stellar network fee for a deposit via simulateTransaction.
  */
 export async function estimateDepositFee(
-  params: DepositParams
+  params: DepositQuoteParams & { minSharesOut?: bigint }
 ): Promise<NetworkFeeEstimate> {
   try {
-    const { transaction } = await buildDepositTransaction(params);
+    const { transaction } = await buildDepositTransaction({
+      minSharesOut: BigInt(0),
+      ...params,
+    });
     const total = BigInt(transaction.fee) || BigInt(BASE_FEE);
     return { feeStroops: total, feeXlm: stroopsToXlm(total), available: true };
   } catch (err) {
@@ -218,7 +229,7 @@ export async function estimateDepositFee(
  * contract's read-only `preview_deposit` (Issue #1129) — simulated against
  * the live contract instead of assuming a 1:1 amount-to-shares ratio.
  */
-export async function previewDeposit(params: DepositParams): Promise<{
+export async function previewDeposit(params: DepositQuoteParams): Promise<{
   sharesExpected: bigint;
   available: boolean;
   error?: string;
@@ -285,13 +296,14 @@ export async function estimateWithdrawFee(
 /**
  * Build a Soroban `deposit` contract invocation transaction.
  *
- * The vault contract's `deposit(user, amount)` function is called.
- * Amount is bigint stroops or a decimal string, parsed without floating point.
+ * The vault contract's `deposit(user, amount, min_shares_out)` function is
+ * called. Amount is bigint stroops or a decimal string, parsed without
+ * floating point.
  */
 export async function buildDepositTransaction(
   params: DepositParams
 ): Promise<BuiltTransaction> {
-  const { walletAddress, contractId, amount: rawAmount } = params;
+  const { walletAddress, contractId, amount: rawAmount, minSharesOut } = params;
   const network = getCurrentNetwork();
 
   const server = getServer(network.rpcUrl);
@@ -309,7 +321,8 @@ export async function buildDepositTransaction(
       contract.call(
         "deposit",
         new Address(walletAddress).toScVal(),
-        nativeToScVal(amountStroops, { type: "i128" })
+        nativeToScVal(amountStroops, { type: "i128" }),
+        nativeToScVal(minSharesOut, { type: "i128" })
       )
     )
     .setTimeout(TX_TIMEOUT_SECONDS)
@@ -585,6 +598,27 @@ export async function submitTransaction(
 
 // ── High-level vault flows ───────────────────────────────────────────────────
 
+/**
+ * Minimum shares to accept for a deposit: preview_deposit minus the user's
+ * slippage tolerance. Re-quotes when the cached preview is older than
+ * QUOTE_MAX_AGE_MS so a stale quote is never signed. Throws when no live quote
+ * can be obtained rather than falling back to an unbounded deposit.
+ */
+export async function resolveDepositMinSharesOut(
+  params: DepositQuoteParams,
+  slippageBps: number,
+  cached?: TimedQuote<bigint> | null
+): Promise<{ minSharesOut: bigint; quote: TimedQuote<bigint> }> {
+  const quote = await resolveFreshQuote(cached, async () => {
+    const preview = await previewDeposit(params);
+    if (!preview.available) {
+      throw new Error("Unable to fetch a current deposit quote. Please try again.");
+    }
+    return preview.sharesExpected;
+  });
+  return { minSharesOut: applySlippage(quote.value, slippageBps), quote };
+}
+
 function isRealContractId(id: string): boolean {
   return /^C[A-Z0-9]{55}$/.test(id);
 }
@@ -595,13 +629,16 @@ export async function executeVaultDeposit(params: {
   contractId: string;
   asset: "USDC" | "XLM";
   amount: bigint | string;
+  minSharesOut: bigint;
 }): Promise<TransactionReceipt> {
-  const { walletAddress, contractId, amount } = params;
+  const { walletAddress, contractId, amount, minSharesOut } = params;
 
   if (!isRealContractId(contractId)) {
     throw new Error("Vault is not yet live. Deposits are currently disabled.");
   }
 
+  const { xdr } = await buildDepositTransaction({ walletAddress, contractId, amount, minSharesOut });
+  const signedXdr = await signTransaction(xdr);
   await assertWalletOnDappNetwork();
   const signedXdr = await signWithExpiryRebuild(
     () => buildDepositTransaction({ walletAddress, contractId, amount }),
@@ -616,7 +653,7 @@ export async function executeVaultWithdraw(params: {
   contractId: string;
   asset: "USDC" | "XLM";
   shares: number;
-  minAssetsOut?: number;
+  minAssetsOut?: bigint | number;
 }): Promise<TransactionReceipt> {
   const { walletAddress, contractId, shares, minAssetsOut } = params;
 

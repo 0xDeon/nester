@@ -85,4 +85,4 @@ Record p50, p95, p99, error rate, dropped iterations, websocket connection failu
 
 ## CI
 
-`.github/workflows/load-soak.yml` runs the two-hour soak nightly and can be launched manually. It requires the `STAGING_LOAD_API_BASE_URL`, `STAGING_LOAD_WS_URL`, `STAGING_LOAD_VAULT_ID`, and `STAGING_LOAD_AUTH_TOKEN` repository secrets. The workflow exits safely when the staging API URL secret is absent and uploads the k6 JSON summary when it runs. Keep staging isolated and use a dedicated test vault.
+`.github/workflows/nightly.yml` runs the two-hour soak weekly (Sunday 02:00 UTC) and can be launched manually. It requires the `STAGING_LOAD_API_BASE_URL`, `STAGING_LOAD_WS_URL`, `STAGING_LOAD_VAULT_ID`, and `STAGING_LOAD_AUTH_TOKEN` repository secrets. The workflow exits safely when the staging API URL secret is absent and uploads the k6 JSON summary when it runs. Keep staging isolated and use a dedicated test vault.

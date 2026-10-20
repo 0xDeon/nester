@@ -4,16 +4,42 @@ This document describes the security gates that protect the Nester codebase. Eac
 
 ## Overview
 
-| Language              | Gate                                | Threshold                                 | Workflow                 |
-| --------------------- | ----------------------------------- | ----------------------------------------- | ------------------------ |
-| Go                    | `govulncheck`                       | 0 unknown CVEs (accepted list maintained) | `security.yml`, `ci.yml` |
-| Go                    | `gosec`                             | medium severity                           | `security.yml`           |
-| Rust                  | `cargo-audit`                       | any CVE                                   | `security.yml`           |
-| JavaScript/TypeScript | `pnpm audit`                        | critical only                             | `security.yml`, `ci.yml` |
-| JavaScript/TypeScript | `eslint` + `eslint-plugin-security` | all violations                            | `ci.yml` dapp job        |
-| All                   | `gitleaks`                          | any secret detection                      | `security.yml`           |
-| All                   | `semgrep`                           | all violations (XSS, injection, etc.)     | `security.yml`           |
-| All                   | `CodeQL`                            | all violations                            | `security.yml`           |
+Each tool runs exactly once per change.
+
+| Language              | Gate                                | Threshold                                 | Workflow / job                    |
+| --------------------- | ----------------------------------- | ----------------------------------------- | --------------------------------- |
+| Go                    | `govulncheck`                       | 0 unknown CVEs (accepted list maintained) | `security.yml` / `deps`           |
+| Go                    | `gosec`                             | medium severity                           | `security.yml` / `sast`           |
+| Rust                  | `cargo-audit`                       | any CVE                                   | `security.yml` / `deps`           |
+| JavaScript/TypeScript | `pnpm audit`                        | critical only                             | `security.yml` / `deps`           |
+| JavaScript/TypeScript | `eslint` + `eslint-plugin-security` | all violations                            | `ci.yml` / `dapp`                 |
+| All                   | `gitleaks`                          | any secret detection                      | `security.yml` / `secrets`        |
+| All                   | `semgrep`                           | all violations (XSS, injection, etc.)     | `security.yml` / `sast`           |
+| All                   | `CodeQL`                            | all violations                            | `security.yml` / `sast`           |
+| Contracts             | `scripts/contract-audit.sh`         | audit service findings                    | `security.yml` / `contract-audit` |
+
+## Required status checks
+
+Branch protection on `dev` and `main` requires exactly these checks:
+
+| Check           | Workflow       | What it covers                                      |
+| --------------- | -------------- | --------------------------------------------------- |
+| `CI gate`       | `ci.yml`       | `website`, `dapp`, `api`, `contracts`, `observability` |
+| `Security gate` | `security.yml` | `secrets`, `deps`, `sast`, `sbom`, `contract-audit` |
+
+Each gate job aggregates every job in its workflow. A job skipped by the path filter counts as a pass; a failed or
+cancelled job fails the gate. Requiring the gates rather than the individual jobs keeps the list well under the limit of
+eight and means a path-filtered job that was skipped can never leave a required check pending.
+
+No required job uses `continue-on-error`.
+
+## Workflow budget
+
+`.github/workflows/` holds at most six files: `ci.yml`, `security.yml`, `nightly.yml`, `synthetic-probes.yml`,
+`deploy-staging.yml` and, once it lands, `deploy-production.yml`. Adding a seventh requires removing one, and the PR must
+say why. Every workflow declares top-level `permissions: contents: read` (jobs that need more raise it themselves), and
+every action is pinned to a commit SHA. Go, Rust and Node/pnpm setup lives in the `.github/actions/setup` composite
+action.
 
 ## Go (apps/api)
 
@@ -89,8 +115,7 @@ pnpm audit --audit-level=critical
 
 **Where it runs:**
 
-- `security.yml` — dapp and website jobs
-- `ci.yml` — dapp-frontend job
+- `security.yml` — `deps` job, `pnpm` leg
 
 ### eslint + eslint-plugin-security
 
@@ -107,7 +132,7 @@ pnpm run lint
 
 **Where it runs:**
 
-- `ci.yml` — dapp-frontend job, now enforced (was `continue-on-error: true`, fixed in #1236)
+- `ci.yml` — `dapp` job (`lint:security`), enforced (was `continue-on-error: true`, fixed in #1236)
 
 ## All Languages
 
@@ -123,7 +148,7 @@ gitleaks detect --source . --no-git --redact --config .gitleaks.toml
 
 **Where it runs:**
 
-- `security.yml` — always
+- `security.yml` — `secrets` job, always
 
 ### semgrep
 
@@ -137,7 +162,7 @@ semgrep scan --config p/typescript p/react p/nextjs p/secrets
 
 **Where it runs:**
 
-- `security.yml` — dapp changes
+- `security.yml` — `sast` job, `js` leg, dapp changes
 
 ### CodeQL
 
@@ -145,29 +170,37 @@ semgrep scan --config p/typescript p/react p/nextjs p/secrets
 
 **Where it runs:**
 
-- `security.yml` — always
+- `security.yml` — `sast` job, one leg per changed language
 
 ## CI Workflows
 
-### ci.yml (Per-Job)
+### ci.yml
 
-Runs on every push/PR, gates specific areas for fast feedback:
+Runs on pull requests and pushes to `dev`/`main`. Jobs are path-filtered (`.github/path-filters.yml`):
 
-- **Dapp Frontend:** Lint (security), build, unit tests, E2E tests, JS audit
-- **API:** Build, unit tests, database integration tests
-- **Contracts:** Build, unit tests, property tests
-- **Security:** gitleaks, CodeQL, per-language audits
+- **website:** build, lint
+- **dapp:** lint (security rules), build, unit tests, Playwright E2E
+- **api:** migration checks, build, vet, staticcheck, OpenAPI check, unit, integration and property tests
+- **contracts:** build, tests, fmt, clippy, integration tests, WASM hashes
+- **observability:** promtool/amtool checks, burn-rate and probe tests, dashboard drift (only when
+  `docker/prometheus/**`, alertmanager, grafana or probe files change)
 
-### security.yml (Full Suite)
+### security.yml
 
-Scheduled weekly + triggered by security/\* file changes:
+Runs on pull requests, pushes to `dev`/`main`, weekly, and on demand. Language-specific scans are path-filtered the same
+way; scheduled and manual runs scan everything:
 
-- gitleaks (all branches)
-- pnpm audit (critical gate + moderate warning)
-- govulncheck (with accepted list)
-- cargo-audit
-- CodeQL
-- Semgrep
+- **secrets:** gitleaks over full history
+- **deps:** `pnpm audit`, `govulncheck`, `cargo-audit`
+- **sast:** gosec, Semgrep, typosquat check, CodeQL
+- **sbom:** CycloneDX/syft SBOMs
+- **contract-audit:** `scripts/contract-audit.sh`
+
+### nightly.yml
+
+Daily 03:00 UTC: contracts property tests and fuzzing, API property tests, testnet deposit/withdraw journey. Weekly
+(Sunday 02:00 UTC) and on demand: staging load soak. A failed scheduled run opens or updates one `nightly-failure`
+tracking issue.
 
 ## When a Gate Fails
 
@@ -183,7 +216,7 @@ If you add a new security tool:
 
 1. Run it locally first
 2. Fix or justify any findings
-3. Add it to the appropriate workflow (ci.yml for fast feedback, security.yml for comprehensive checks)
+3. Add it to the one workflow that should own it (ci.yml for build/test, security.yml for scanners); a tool must not run in two
 4. Document the threshold and policy in this file
 5. Ensure it blocks the build or clearly state why it doesn't
 
@@ -192,7 +225,8 @@ If you add a new security tool:
 - [SECURITY.md](../SECURITY.md) — production security model
 - [deploy/](../../deploy) — production security posture
 - `.github/workflows/security.yml` — full security job definitions
-- `.github/workflows/ci.yml` — per-job gates
+- `.github/workflows/ci.yml` — build and test gates
+- `.github/workflows/nightly.yml` — scheduled property tests, fuzzing, E2E and soak
 
 ## Verification: Testing Each Gate
 

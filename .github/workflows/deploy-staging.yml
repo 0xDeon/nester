@@ -23,6 +23,9 @@ on:
   #     - 'docs/**'
   #     - '**.md'
 
+permissions:
+  contents: read
+
 concurrency:
   # Allow one deploy at a time to avoid conflicts
   group: staging-deployment
@@ -44,8 +47,8 @@ jobs:
       api: ${{ steps.filter.outputs.api }}
       contracts: ${{ steps.filter.outputs.contracts }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dorny/paths-filter@b41dfa943b1939b9b646f67753bfe35cf6e4de03 # v3.0.2
         id: filter
         with:
           base: ${{ github.event_name == 'push' && github.event.before || '' }}
@@ -68,14 +71,12 @@ jobs:
     if: needs.changes.outputs.dapp == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
-          node-version: "22"
-          cache: pnpm
+          node: "true"
+          install: "false"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -90,7 +91,7 @@ jobs:
           NEXT_PUBLIC_STELLAR_HORIZON_URL: "https://horizon-testnet.stellar.org"
 
       - name: Upload dApp artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dapp-build
           path: apps/dapp/frontend/.next/
@@ -105,12 +106,11 @@ jobs:
     if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-go@v4
+      - uses: ./.github/actions/setup
         with:
-          go-version: "1.22"
-          cache-dependency-path: "apps/api/go.sum"
+          go: "true"
 
       - name: Build API
         run: |
@@ -124,7 +124,7 @@ jobs:
           go test -race -timeout 120s -short ./...
 
       - name: Upload API artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: api-build
           path: |
@@ -147,7 +147,7 @@ jobs:
       staging_url: ${{ steps.deploy.outputs.url }}
       deployment_id: ${{ steps.deploy.outputs.deployment_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Check required secrets
         env:
@@ -162,14 +162,14 @@ jobs:
 
       - name: Download dApp artifacts
         if: needs.build-dapp.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dapp-build
           path: apps/dapp/frontend/.next/
 
       - name: Download API artifacts
         if: needs.build-api.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: api-build
           path: apps/api/
@@ -263,19 +263,13 @@ jobs:
     if: github.event.inputs.skip_smoke_tests != 'true'
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.sha }}
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
-          node-version: "22"
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+          node: "true"
 
       - name: Install Playwright browsers
         run: pnpm --filter @nester/dapp exec playwright install chromium --with-deps
@@ -359,7 +353,7 @@ jobs:
 
       - name: Upload test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: smoke-test-results-${{ github.run_id }}
           path: |
@@ -370,7 +364,7 @@ jobs:
 
       - name: Comment on deployment PR (if applicable)
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const status = "${{ steps.summary.outputs.status }}";
@@ -385,7 +379,7 @@ jobs:
 
       - name: Notify Slack on failure
         if: failure() || needs.smoke-test.result != 'success'
-        uses: slackapi/slack-github-action@v1
+        uses: slackapi/slack-github-action@fcfb566f8b0aab22203f066d80ca1d7e4b5d05b3 # v1
         with:
           payload: |
             {

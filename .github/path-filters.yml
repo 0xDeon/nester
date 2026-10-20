@@ -1,0 +1,29 @@
+# Shared path filters for ci.yml and security.yml (dorny/paths-filter). Kept in
+# one file so the two workflows can never disagree about what "api changed"
+# means. `shared` forces every area to run.
+shared:
+  - '.github/workflows/**'
+  - '.github/actions/**'
+  - '.github/path-filters.yml'
+  - 'pnpm-lock.yaml'
+  - 'package.json'
+  - 'pnpm-workspace.yaml'
+website:
+  - 'apps/website/**'
+  - 'pnpm-lock.yaml'
+  - 'pnpm-workspace.yaml'
+dapp:
+  - 'apps/dapp/**'
+api:
+  - 'apps/api/**'
+contracts:
+  - 'packages/contracts/**'
+  - 'scripts/contract-audit.sh'
+observability:
+  - 'docker/prometheus/**'
+  - 'docker/alertmanager/**'
+  - 'docker/grafana/**'
+  - 'scripts/build_slo_dashboards.py'
+  - 'tests/probes/**'
+python:
+  - '**/*.py'
