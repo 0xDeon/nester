@@ -64,6 +64,6 @@ empty.
   have a corresponding fix implemented in the respective contract crate.
 - Regression tests must be added to `packages/contracts/tests/integration`
   or the contract-local `src/test.rs` suites.
-- CI (`.github/workflows/contract-audit.yml` and `ci.yml`) must pass all
+- CI (`.github/workflows/security.yml` and `ci.yml`) must pass all
   integration tests and clippy checks with zero warnings before a finding
   is marked resolved.

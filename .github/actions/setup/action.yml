@@ -1,0 +1,73 @@
+name: Setup toolchains
+description: >-
+  Shared toolchain setup for Go, Rust (with the wasm target) and Node/pnpm,
+  with caching. Each toolchain is opt-in so a job only pays for what it uses.
+
+inputs:
+  go:
+    description: Install Go (version read from apps/api/go.mod) with module and build caching.
+    default: "false"
+  rust:
+    description: Install Rust with the wasm32 target, rustfmt and clippy, with cargo caching.
+    default: "false"
+  rust-toolchain:
+    description: Rust toolchain channel.
+    default: stable
+  rust-workspace:
+    description: Cargo workspace directory used as the cache key root.
+    default: packages/contracts
+  node:
+    description: Install Node and pnpm with the pnpm store cached.
+    default: "false"
+  node-version:
+    description: Node version.
+    default: "22"
+  install:
+    description: Run `pnpm install --frozen-lockfile --ignore-scripts` after setting up Node.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Go
+      if: inputs.go == 'true'
+      uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v5.3.0
+      with:
+        go-version-file: apps/api/go.mod
+        cache: true
+        cache-dependency-path: apps/api/go.sum
+
+    - name: Setup Rust
+      if: inputs.rust == 'true' && inputs.rust-toolchain == 'stable'
+      uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      with:
+        targets: wasm32-unknown-unknown
+        components: rustfmt,clippy
+
+    - name: Setup Rust (nightly)
+      if: inputs.rust == 'true' && inputs.rust-toolchain == 'nightly'
+      uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Cache cargo
+      if: inputs.rust == 'true'
+      uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+      with:
+        workspaces: ${{ inputs.rust-workspace }}
+
+    - name: Setup pnpm
+      if: inputs.node == 'true'
+      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
+
+    - name: Setup Node
+      if: inputs.node == 'true'
+      uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    - name: Install JS dependencies
+      if: inputs.node == 'true' && inputs.install == 'true'
+      shell: bash
+      run: pnpm install --frozen-lockfile --ignore-scripts

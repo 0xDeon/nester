@@ -8,12 +8,12 @@ This document lists every secret required or consumed by GitHub Actions workflow
 | -------------------------- | ------------------------- | -------- | --------------------------------------------------- | -------------------------------------------------------- |
 | `SEMGREP_APP_TOKEN`        | `security.yml`            | No       | Enable Semgrep cloud findings                       | Silent degradation — SAST runs but without cloud context |
 | `STAGING_DEPLOY_TOKEN`     | `deploy-staging.yml`      | Yes      | Authenticate with staging deploy service            | Workflow fails                                           |
-| `X402_PAYMENT_PROOF`       | `contract-audit.yml`      | No       | Pay for on-demand contract audits                   | Skipped — audit service not used                         |
-| `TESTNET_WALLET_ADDRESS`   | `e2e-testnet-nightly.yml` | Yes      | Funded Stellar testnet account for E2E tests        | Workflow fails                                           |
+| `X402_PAYMENT_PROOF`       | `security.yml`            | No       | Pay for on-demand contract audits                   | Skipped — audit service not used                         |
+| `TESTNET_WALLET_ADDRESS`   | `nightly.yml`              | Yes      | Funded Stellar testnet account for E2E tests        | Workflow fails                                           |
 | `SMOKE_TEST_WALLET_SECRET` | `deploy-staging.yml`      | Yes      | Stellar testnet account for post-deploy smoke tests | Workflow fails                                           |
 | `SLACK_DEPLOYMENT_WEBHOOK` | `deploy-staging.yml`      | No       | Send deployment notifications to Slack              | Notifications silently skipped                           |
 | `STAGING_PROBE_*`          | `synthetic-probes.yml`    | No\*     | Staging environment endpoints & credentials         | Guard prevents execution; workflow skipped               |
-| `STAGING_LOAD_*`           | `load-soak.yml`           | No\*     | Staging environment for load/soak tests             | Guard prevents execution; workflow skipped               |
+| `STAGING_LOAD_*`           | `nightly.yml`              | No\*     | Staging environment for load/soak tests             | Guard prevents execution; workflow skipped               |
 | `GITHUB_TOKEN`             | Multiple                  | N/A      | Built-in token for GitHub API access                | Provided automatically by GitHub                         |
 
 \*Optional but required as a set if you want to run probes/load tests.
@@ -82,7 +82,7 @@ Workflow status: FAILED
 
 ### X402_PAYMENT_PROOF
 
-**Workflow:** `.github/workflows/contract-audit.yml` → `Run pre-deploy contract audit`
+**Workflow:** `.github/workflows/security.yml` → `contract-audit` → `Run pre-deploy contract audit`
 
 **Purpose:** Proof-of-payment (Solana transaction signature) to access the x402 on-demand smart contract audit service.
 
@@ -111,7 +111,7 @@ Workflow continues; no audit is performed.
 
 ### TESTNET_WALLET_ADDRESS
 
-**Workflow:** `.github/workflows/e2e-testnet-nightly.yml` → `Run deposit/withdraw journey`
+**Workflow:** `.github/workflows/nightly.yml` → `e2e-testnet` → `Run deposit/withdraw journey`
 
 **Purpose:** Funded Stellar testnet account address used for end-to-end deposit/withdraw tests against testnet.
 
@@ -215,7 +215,7 @@ All must be set as a group for probes to run. If any is missing, the guard detec
 
 ### STAGING_LOAD_API_BASE_URL
 
-**Workflow:** `.github/workflows/load-soak.yml` → Check guard step
+**Workflow:** `.github/workflows/nightly.yml` → `soak` → Check guard step
 
 **Purpose:** Base URL of the staging API for load and soak testing.
 
@@ -300,7 +300,7 @@ These workflows have explicit guards that fail with clear error messages:
   - Failure: `::error::SMOKE_TEST_WALLET_SECRET is not configured...`
   - Result: Workflow exits with code 1
 
-- **TESTNET_WALLET_ADDRESS** (e2e-testnet-nightly.yml)
+- **TESTNET_WALLET_ADDRESS** (nightly.yml)
   - Check: Guard in "Run deposit/withdraw journey" step
   - Failure: `::error::TESTNET_WALLET_ADDRESS is not configured...`
   - Result: Workflow exits with code 1
@@ -333,7 +333,7 @@ These workflows handle missing secrets without blocking:
   - Result: Entire job skips; no failure
   - Already graceful ✓
 
-- **STAGING*LOAD*\* secrets** (load-soak.yml)
+- **STAGING*LOAD*\* secrets** (nightly.yml)
   - Check: Guard step checks API_BASE_URL
   - Behavior: `::notice::STAGING_LOAD_API_BASE_URL is not set — skipping the soak run`
   - Result: Entire job skips; no failure

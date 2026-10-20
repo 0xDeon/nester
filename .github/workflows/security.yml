@@ -1,12 +1,20 @@
 name: Security
 
+# Every security tool runs exactly once per change, here. Language-specific
+# scans are path-filtered with the same filters as ci.yml; the scheduled and
+# manual runs scan everything.
+#
+# Required status checks (see docs/security/ci-gates.md): "Security gate". It
+# aggregates every job below, so a job skipped by the path filter counts as a
+# pass and a failed or cancelled job blocks the merge.
+
 on:
   pull_request:
-    branches: ["*"]
   push:
-    branches: ["*"]
+    branches: [dev, main]
   schedule:
     - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -14,93 +22,147 @@ concurrency:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
-  secret-scan:
-    name: Secret Detection (gitleaks)
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      deps_matrix: ${{ steps.matrix.outputs.deps }}
+      sast_matrix: ${{ steps.matrix.outputs.sast }}
+      sbom: ${{ steps.matrix.outputs.sbom }}
+      contracts: ${{ steps.matrix.outputs.contracts }}
+      dapp: ${{ steps.matrix.outputs.dapp }}
+      api: ${{ steps.matrix.outputs.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Scheduled and manual runs have no diff to filter on and scan everything.
+      - uses: dorny/paths-filter@b41dfa943b1939b9b646f67753bfe35cf6e4de03 # v3.0.2
+        id: filter
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        with:
+          base: ${{ github.event_name == 'push' && github.event.before || '' }}
+          filters: .github/path-filters.yml
+
+      - name: Build job matrices
+        id: matrix
+        env:
+          ALL: ${{ github.event_name != 'pull_request' && github.event_name != 'push' }}
+          SHARED: ${{ steps.filter.outputs.shared }}
+          WEBSITE: ${{ steps.filter.outputs.website }}
+          DAPP: ${{ steps.filter.outputs.dapp }}
+          API: ${{ steps.filter.outputs.api }}
+          CONTRACTS: ${{ steps.filter.outputs.contracts }}
+          PYTHON: ${{ steps.filter.outputs.python }}
+        run: |
+          on() { [ "$ALL" = "true" ] || [ "$SHARED" = "true" ] || [ "$1" = "true" ]; }
+
+          js=false;   if on "$WEBSITE" || on "$DAPP"; then js=true; fi
+          dapp=false; if on "$DAPP"; then dapp=true; fi
+          api=false;  if on "$API"; then api=true; fi
+          rust=false; if on "$CONTRACTS"; then rust=true; fi
+          py=false;   if on "$PYTHON"; then py=true; fi
+
+          deps='[]'
+          [ "$js" = true ]   && deps=$(jq -c '. + [{"tool":"pnpm"}]' <<<"$deps")
+          [ "$api" = true ]  && deps=$(jq -c '. + [{"tool":"govulncheck"}]' <<<"$deps")
+          [ "$rust" = true ] && deps=$(jq -c '. + [{"tool":"cargo-audit"}]' <<<"$deps")
+
+          sast='[]'
+          [ "$api" = true ] && sast=$(jq -c '. + [{"tool":"go","codeql":"go"}]' <<<"$sast")
+          [ "$js" = true ]  && sast=$(jq -c '. + [{"tool":"js","codeql":"javascript-typescript"}]' <<<"$sast")
+          [ "$py" = true ]  && sast=$(jq -c '. + [{"tool":"python","codeql":"python"}]' <<<"$sast")
+
+          sbom=false
+          if [ "$api" = true ] || [ "$dapp" = true ] || [ "$rust" = true ]; then sbom=true; fi
+
+          {
+            echo "deps=$deps"
+            echo "sast=$sast"
+            echo "sbom=$sbom"
+            echo "contracts=$rust"
+            echo "dapp=$dapp"
+            echo "api=$api"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  secrets:
+    name: Secrets (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
-      - name: Run gitleaks
+      - name: Install gitleaks
         run: |
-          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect \
-            --source /repo \
-            --gitleaks-ignore-path /repo/.gitleaksignore \
-            --redact \
-            --verbose \
-            --exit-code 1
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz \
+            | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
 
-  audit-npm:
-    name: Dependency Audit (pnpm)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # Scans full history. .gitleaksignore (read from the source root) and the
+      # allowlist in .gitleaks.toml carry the reviewed false positives.
+      - name: Run gitleaks
+        run: gitleaks detect --source . --redact --no-banner --config .gitleaks.toml
 
-      - uses: pnpm/action-setup@v4
-
-      # No `cache: pnpm` here on purpose. This job never runs `pnpm install`
-      # (audit resolves straight from the lockfile), so the pnpm store is
-      # never created and the post-job cache save fails the whole job with
-      # "Path Validation Error: Path(s) specified in the action for caching
-      # do(es) not exist" even when every audit step passed.
-      - name: Setup Node
-        uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
-        with:
-          node-version: 22
-
-      # This is a pnpm workspace: the single pnpm-lock.yaml at the repo root
-      # covers every package, and no package-lock.json exists anywhere. The
-      # audit therefore runs once from the root rather than per-directory.
-      - name: Warn on moderate and above vulnerabilities
-        run: pnpm audit --audit-level=moderate || true
-
-      # Enforced, not suppressed. Repairing this job (it had been failing on
-      # ENOLOCK rather than actually auditing) exposed 203 findings; the 6
-      # criticals are now fixed outright via root pnpm.overrides and the jspdf
-      # 4.x bump, leaving 0 critical. The residual 76 high / 60 moderate are
-      # transitive-only under Expo/react-native and Trezor and need upstream
-      # releases; #1025 raises this gate to `high` when they land.
-      - name: Fail on critical vulnerabilities
-        run: pnpm audit --audit-level=critical
-
-  audit-go:
-    name: Dependency Audit (Go)
+  deps:
+    name: Deps (${{ matrix.tool }})
+    needs: changes
+    if: needs.changes.outputs.deps_matrix != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        module:
-          - apps/api
-    defaults:
-      run:
-        working-directory: ${{ matrix.module }}
+        include: ${{ fromJSON(needs.changes.outputs.deps_matrix) }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Setup Go
-        uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v5.3.0
+      # pnpm: a workspace with a single root pnpm-lock.yaml, so the audit runs
+      # once from the root. Resolves straight from the lockfile and never needs
+      # an install.
+      - name: Setup pnpm
+        if: matrix.tool == 'pnpm'
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
+
+      - name: Setup Node
+        if: matrix.tool == 'pnpm'
+        uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
         with:
-          go-version-file: ${{ matrix.module }}/go.mod
-          cache: true
+          node-version: 22
 
+      - name: Report moderate and above advisories
+        if: matrix.tool == 'pnpm'
+        run: pnpm audit --audit-level=moderate || true
+
+      # Enforced at `critical`: every critical advisory is fixed through root
+      # pnpm.overrides rather than suppressed, so a new critical breaks the
+      # build. #1025 raises this to `high` once the Expo/react-native and
+      # Trezor transitive backlog clears upstream.
+      - name: Fail on critical advisories
+        if: matrix.tool == 'pnpm'
+        run: pnpm audit --audit-level=critical
+
+      - uses: ./.github/actions/setup
+        if: matrix.tool == 'govulncheck'
+        with:
+          go: "true"
+
+      # Pinned (#1221): an unpinned @latest means whatever the registry serves at
+      # that moment runs in CI with repository context. The pin lives in
+      # security-scanner-versions.env; see that file for the update cadence.
       - name: Install govulncheck
-        # Pinned (#1221): an unpinned @latest means whatever the registry
-        # serves at that moment runs in CI with repository context, and a
-        # rerun of a green build can turn red with no line changed. The pin
-        # lives in security-scanner-versions.env so ci.yml and this workflow
-        # can't drift apart; see that file for the update cadence.
+        if: matrix.tool == 'govulncheck'
         run: |
           . "$GITHUB_WORKSPACE/.github/security-scanner-versions.env"
           go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
 
       - name: Run govulncheck
+        if: matrix.tool == 'govulncheck'
+        working-directory: apps/api
         run: |
           set +e
           OUTPUT=$(govulncheck ./... 2>&1)
@@ -112,10 +174,8 @@ jobs:
           # printed accepted IDs are used to filter findings below.
           ACCEPTED=$(python3 "${{ github.workspace }}/scripts/validate_vulnignore.py" "${{ github.workspace }}/.vulnignore") || exit 1
 
-          # Exit code 0 = no vulnerabilities
-          # Exit code 1 = error running govulncheck
-          # Exit code 3 = vulnerabilities found
-
+          # Exit code 0 = no vulnerabilities, 1 = error running govulncheck,
+          # 3 = vulnerabilities found.
           if [ $EXIT_CODE -eq 0 ]; then
             exit 0
           elif [ $EXIT_CODE -eq 3 ]; then
@@ -123,7 +183,7 @@ jobs:
               echo "$ACCEPTED" | grep -qw "$id" || echo "$id"
             done)
             if [ -z "$UNKNOWN" ]; then
-              echo "⚠️  Only known/accepted vulnerabilities found"
+              echo "Only known/accepted vulnerabilities found"
               exit 0
             fi
             echo "Unknown vulnerabilities: $UNKNOWN"
@@ -132,43 +192,188 @@ jobs:
             exit $EXIT_CODE
           fi
 
-  audit-rust:
-    name: Dependency Audit (Rust)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/contracts
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: ./.github/actions/setup
+        if: matrix.tool == 'cargo-audit'
+        with:
+          rust: "true"
 
       - name: Install cargo-audit
+        if: matrix.tool == 'cargo-audit'
         run: cargo install cargo-audit --locked
 
       - name: Run cargo-audit
+        if: matrix.tool == 'cargo-audit'
+        working-directory: packages/contracts
         run: cargo audit
 
-  codeql:
-    name: Static Analysis (CodeQL)
+  sast:
+    name: SAST (${{ matrix.tool }})
+    needs: changes
+    if: needs.changes.outputs.sast_matrix != '[]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
-        language: ["go", "javascript-typescript", "python"]
+        include: ${{ fromJSON(needs.changes.outputs.sast_matrix) }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup
+        if: matrix.tool == 'go'
+        with:
+          go: "true"
+
+      - name: Install gosec
+        if: matrix.tool == 'go'
+        # Pinned (#1221): see security-scanner-versions.env.
+        run: |
+          . "$GITHUB_WORKSPACE/.github/security-scanner-versions.env"
+          go install github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}
+
+      # Enforcing gate (#1035). gosec -severity medium reports zero issues:
+      # genuine defects are fixed and the remainder are annotated per rule at the
+      # single line each applies to. No rule is globally disabled, so a new
+      # finding fails the build rather than accumulating.
+      - name: Run gosec
+        if: matrix.tool == 'go'
+        working-directory: apps/api
+        run: gosec -severity medium ./...
+
+      # semgrep/semgrep-action is archived; the maintained CLI is run directly,
+      # pinned to a released version.
+      - name: Semgrep (TypeScript/Next.js)
+        if: matrix.tool == 'js' && needs.changes.outputs.dapp == 'true'
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: |
+          if [ -z "$SEMGREP_APP_TOKEN" ]; then
+            echo "::warning::SEMGREP_APP_TOKEN is not configured. Semgrep runs with local rules only. See docs/ci/secrets.md."
+          fi
+          pip install "semgrep==1.175.0"
+          semgrep scan --error --quiet --config p/typescript --config p/react --config p/nextjs --config p/secrets apps/dapp/frontend
+
+      # Compares the base manifest against the head manifest and checks only
+      # dependencies added by this change. The script is an advisory heuristic
+      # that always exits 0 and reports suspects as workflow warnings, so it
+      # cannot block an unrelated PR and needs no continue-on-error.
+      - name: Typosquat detection (new npm dependencies)
+        if: matrix.tool == 'js' && needs.changes.outputs.dapp == 'true'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 scripts/typosquat_check.py apps/dapp/frontend/package.json "$BASE_REF"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@f02afd42b08e9c7fd2198fe321a96e6b3867a0fd # v3
         with:
-          languages: ${{ matrix.language }}
+          languages: ${{ matrix.codeql }}
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@f02afd42b08e9c7fd2198fe321a96e6b3867a0fd # v3
 
       - name: Analyze
         uses: github/codeql-action/analyze@f02afd42b08e9c7fd2198fe321a96e6b3867a0fd # v3
+
+  sbom:
+    name: SBOM
+    needs: changes
+    if: needs.changes.outputs.sbom == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+
+      - name: Install cyclonedx-gomod (Go, pinned release)
+        run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+
+      - name: Install syft (pinned release, checksum-verified)
+        run: |
+          SYFT_VERSION=1.50.0
+          ASSET="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "/tmp/${ASSET}" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${ASSET}"
+          curl -sSfL -o "/tmp/syft_${SYFT_VERSION}_checksums.txt" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_checksums.txt"
+          cd /tmp
+          grep "  ${ASSET}$" "syft_${SYFT_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "${ASSET}"
+          sudo mv /tmp/syft /usr/local/bin/syft
+
+      - name: Generate Go API SBOM
+        if: needs.changes.outputs.api == 'true'
+        working-directory: apps/api
+        run: |
+          cyclonedx-gomod mod -json -output ../../sbom-api.json .
+          syft dir:. --output cyclonedx-json=../../sbom-api-syft.json
+
+      # syft catalogs the pnpm lockfile directly. @cyclonedx/cyclonedx-npm
+      # dropped --pnpm support in v6.
+      - name: Generate frontend SBOM (npm/pnpm)
+        if: needs.changes.outputs.dapp == 'true'
+        working-directory: apps/dapp/frontend
+        run: syft dir:. --output cyclonedx-json=../../../sbom-frontend.json
+
+      - name: Generate contracts SBOM (Rust)
+        if: needs.changes.outputs.contracts == 'true'
+        working-directory: packages/contracts
+        run: syft dir:. --output cyclonedx-json=../../sbom-contracts.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-artifacts
+          path: sbom-*.json
+          if-no-files-found: error
+
+  contract-audit:
+    name: Contract audit (x402)
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run pre-deploy contract audit
+        env:
+          X402_PAYMENT_PROOF: ${{ secrets.X402_PAYMENT_PROOF }}
+          CONTRACT_AUDIT_ADDRESSES: ${{ vars.CONTRACT_AUDIT_ADDRESSES }}
+          CONTRACT_AUDIT_API_URL: ${{ vars.CONTRACT_AUDIT_API_URL }}
+        run: |
+          chmod +x scripts/contract-audit.sh
+          ./scripts/contract-audit.sh
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: contract-audit-reports
+          path: audit-report-*.json
+          if-no-files-found: ignore
+
+  # The single required status check for this workflow. A path-skipped job
+  # reports "skipped", which this treats as a pass; failure or cancellation of
+  # any job blocks the merge.
+  security-gate:
+    name: Security gate
+    needs: [changes, secrets, deps, sast, sbom, contract-audit]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every security job to have passed or been skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "::error::A security job finished with result '$result'."
+              exit 1
+            fi
+          done

@@ -14,7 +14,7 @@ These probes move money on whatever environment they point at. Three
 independent guards keep that from ever being production:
 
 1. ``PROBE_API_BASE_URL`` has no default. An unset value aborts; there is no
-   fallback to localhost and none to a deployed host. The load-soak workflow
+   fallback to localhost and none to a deployed host. The nightly soak job
    establishes this convention for exactly the same reason.
 
 2. ``PROBE_ENVIRONMENT`` must be a non-production value and is checked against

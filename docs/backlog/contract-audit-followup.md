@@ -33,7 +33,7 @@ Nester smart contracts have not yet undergone professional security audit. This 
 ## Pre-Audit Checklist
 
 - [ ] All contracts pass local `cargo test`
-- [ ] All contracts pass property-based testing via `contracts-property-nightly.yml`
+- [ ] All contracts pass property-based testing via `nightly.yml`
 - [ ] Code follows Soroban best practices and naming conventions
 - [ ] All public functions have doc comments
 - [ ] No use of unsafe patterns or deprecated SDK methods

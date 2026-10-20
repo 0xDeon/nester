@@ -1,0 +1,284 @@
+name: Nightly
+
+# Everything that is too slow or too environment-dependent to gate a pull
+# request. Failures of a scheduled run open or update one tracking issue instead
+# of one notification per job.
+#
+#   daily  03:00 UTC  contracts property tests and fuzzing, API property tests,
+#                     testnet deposit/withdraw journey
+#   weekly 02:00 Sun  staging load soak (a second cron; the daily jobs are
+#                     skipped on that trigger so they do not run twice)
+#
+# The testnet journey needs a funded account and the soak needs a staging
+# target; both skip themselves with a notice when that is not configured:
+#   TESTNET_WALLET_ADDRESS (secret), VAULT_ID (variable), STAGING_URL (variable)
+#   STAGING_LOAD_* (secrets), see docs/ci/secrets.md.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      staging_url:
+        description: "Base URL for the testnet journey (overrides the STAGING_URL variable)"
+        required: false
+        type: string
+      run_soak:
+        description: "Also run the staging load soak"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  contracts-property:
+    name: Contracts property tests
+    if: github.event.schedule != '0 2 * * 0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: packages/contracts
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: ./.github/actions/setup
+        with:
+          rust: "true"
+
+      # Deliberately omit PROPTEST_RNG_SEED: each nightly run explores a new set
+      # of sequences, while ci.yml supplies the reproducible merge gate.
+      - name: Run randomized share-accounting properties
+        env:
+          PROPTEST_CASES: "256"
+        run: cargo test -p nester-integration-tests property_tests -- --nocapture
+
+  contracts-fuzz:
+    name: Fuzz vault conversion arithmetic
+    if: github.event.schedule != '0 2 * * 0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/contracts/contracts/vault/fuzz
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # cargo-fuzz's sanitizer and coverage instrumentation need nightly's
+      # unstable -Zsanitizer flags; the rest of the contracts workspace builds on
+      # stable, so this is scoped to this one job.
+      - uses: ./.github/actions/setup
+        with:
+          rust: "true"
+          rust-toolchain: nightly
+          rust-workspace: packages/contracts/contracts/vault/fuzz
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      # 600s matches the 20-minute timeout with headroom for toolchain and
+      # instrumented-build time, which dominates the wall clock.
+      - name: Fuzz conversion_math
+        run: cargo fuzz run conversion_math -- -max_total_time=600
+
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vault-conversion-fuzz-artifacts
+          path: packages/contracts/contracts/vault/fuzz/artifacts/conversion_math/
+          retention-days: 30
+
+  api-property:
+    name: API property tests
+    if: github.event.schedule != '0 2 * * 0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+
+      # Deliberately omit RAPID_SEED: each nightly run explores a new set of
+      # sequences, while ci.yml supplies the reproducible merge gate.
+      - name: Run randomized share-accounting properties
+        env:
+          RAPID_CHECKS: "256"
+        run: go test -timeout 120s -run PropertyBased -v ./internal/domain/vault
+
+  e2e-testnet:
+    name: Testnet deposit / withdraw journey
+    if: github.event.schedule != '0 2 * * 0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/dapp/frontend
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: ./.github/actions/setup
+        with:
+          node: "true"
+          install: "false"
+
+      - name: Install dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Only needed when driving a locally served build. With STAGING_URL set
+      # the workflow tests the deployed app instead and this is wasted work.
+      - name: Build dapp
+        if: ${{ !inputs.staging_url && !vars.STAGING_URL }}
+        run: pnpm build
+
+      - name: Start dapp
+        if: ${{ !inputs.staging_url && !vars.STAGING_URL }}
+        run: |
+          pnpm start -p 3001 &
+          npx wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run deposit/withdraw journey
+        env:
+          TESTNET_WALLET_ADDRESS: ${{ secrets.TESTNET_WALLET_ADDRESS }}
+          VAULT_ID: ${{ vars.VAULT_ID }}
+          STAGING_URL: ${{ inputs.staging_url || vars.STAGING_URL }}
+          CI: "true"
+        run: |
+          # Skip rather than fail: a hard failure means a red build every night
+          # until someone provisions testnet credentials, which trains people to
+          # ignore the notification. A notice is visible in the run summary
+          # without being a false alarm, and matches the spec's own skip guard.
+          if [ -z "$TESTNET_WALLET_ADDRESS" ]; then
+            echo "::notice::TESTNET_WALLET_ADDRESS is not configured; skipping the testnet E2E run."
+            echo "Set it under Settings → Secrets and variables → Actions. See docs/ci/secrets.md."
+            exit 0
+          fi
+
+          pnpm test:e2e:testnet
+
+      # On failure only: the trace and screenshots identify which step of the
+      # journey broke.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            apps/dapp/frontend/playwright-report
+            apps/dapp/frontend/test-results
+          retention-days: 14
+
+  soak:
+    name: k6 soak (staging)
+    if: github.event.schedule == '0 2 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.run_soak)
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # The checked-out workspace is mounted into the k6 container; do not
+          # leave the default GITHUB_TOKEN in .git/config for test code to read.
+          persist-credentials: false
+
+      # A missing secret must never cause a test to fall back to localhost or
+      # production. The `secrets` context is not available in a job-level `if`,
+      # so the guard lives in a step: every later step keys off its output.
+      - name: Check staging target is configured
+        id: guard
+        env:
+          API_BASE_URL: ${{ secrets.STAGING_LOAD_API_BASE_URL }}
+        run: |
+          if [ -z "$API_BASE_URL" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::STAGING_LOAD_API_BASE_URL is not set — skipping the soak run."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run isolated staging soak
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          API_BASE_URL: ${{ secrets.STAGING_LOAD_API_BASE_URL }}
+          WS_URL: ${{ secrets.STAGING_LOAD_WS_URL }}
+          VAULT_ID: ${{ secrets.STAGING_LOAD_VAULT_ID }}
+          AUTH_TOKEN: ${{ secrets.STAGING_LOAD_AUTH_TOKEN }}
+        run: |
+          mkdir -p results
+          docker run --rm --network host \
+            -e API_BASE_URL -e WS_URL -e VAULT_ID -e AUTH_TOKEN \
+            -v "$PWD:/work" -w /work grafana/k6:latest \
+            run --summary-export results/soak-summary.json tests/load/soak.js
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: k6-soak-summary-${{ github.run_id }}
+          path: results/soak-summary.json
+          if-no-files-found: warn
+
+  # Opens one tracking issue the first time a scheduled run fails and appends a
+  # comment on every later failure, rather than one issue per failing night.
+  report:
+    name: Report failures
+    needs: [contracts-property, contracts-fuzz, api-property, e2e-testnet, soak]
+    if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const needs = JSON.parse(process.env.NEEDS);
+            const failed = Object.entries(needs)
+              .filter(([, job]) => job.result === 'failure')
+              .map(([name]) => name);
+            const title = 'Nightly run failing';
+            const label = 'nightly-failure';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Failed jobs: ${failed.map((n) => `\`${n}\``).join(', ')}\n\nRun: ${runUrl}`;
+
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            });
+            const existing = open.find((issue) => issue.title === title);
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: [label],
+              body: `The scheduled nightly workflow has failing jobs. Later failures are appended as comments; close this issue once the cause is fixed.\n\n${body}`,
+            });
