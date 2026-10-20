@@ -42,7 +42,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
 
       # No `cache: pnpm` here on purpose. This job never runs `pnpm install`
       # (audit resolves straight from the lockfile), so the pnpm store is
