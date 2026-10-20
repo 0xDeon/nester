@@ -40,7 +40,7 @@ const jsonLd = {
           "name": "What is Nester?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Nester is a DeFi savings and yield platform that lets you deposit stablecoins into non-custodial smart vaults and automatically earn optimized returns across audited protocols like Aave and Blend on Stellar."
+            "text": "Nester is a DeFi savings and yield platform that lets you deposit stablecoins into non-custodial smart vaults and automatically earn optimized returns through Blend on Stellar."
           }
         },
         {
