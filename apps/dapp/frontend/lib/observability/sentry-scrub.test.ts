@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { scrubSentryEvent } from "@/lib/observability/sentry-scrub";
+import { scrubSentryBreadcrumb, scrubSentryEvent } from "@/lib/observability/sentry-scrub";
+import { sentryPrivacyOptions } from "@/lib/observability/sentry-privacy";
 
 /**
  * scrubSentryEvent is intentionally generic over `object` (see sentry-scrub.ts
@@ -11,6 +12,7 @@ interface TestSentryEvent {
   transaction?: string;
   exception?: { values?: Array<{ value?: string }> };
   request?: {
+    query_string?: unknown;
     url?: string;
     headers?: Record<string, string>;
     cookies?: unknown;
@@ -18,6 +20,8 @@ interface TestSentryEvent {
   };
   breadcrumbs?: Array<{ message?: string; data?: Record<string, unknown> }>;
   extra?: Record<string, unknown>;
+  user?: Record<string, unknown>;
+  contexts?: Record<string, unknown>;
 }
 
 const WALLET = "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW";
@@ -113,5 +117,67 @@ describe("scrubSentryEvent", () => {
       },
     };
     expect(scrubSentryEvent(hostile)).toBeNull();
+  });
+
+  describe("financial PII", () => {
+    const XDR =
+      "AAAAAgAAAABzdv3ojkzWHMD7KUoXhrPx0GH18vHKV0ZfqpMiEblG1gAAAGQAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAABkQ0LAAAAAAAAAAQAAAAAAAAABAAAAAA==";
+
+    it("redacts base64 XDR in messages, exceptions and breadcrumbs", () => {
+      const event: TestSentryEvent = {
+        message: `submit failed xdr=${XDR}`,
+        exception: { values: [{ value: `bad envelope ${XDR}` }] },
+        breadcrumbs: [{ message: `signed ${XDR}` }],
+      };
+      const out = scrubSentryEvent(event);
+      expect(JSON.stringify(out)).not.toContain(XDR);
+    });
+
+    it("redacts bearer tokens that are not JWT-shaped", () => {
+      const event: TestSentryEvent = { message: "401 for Authorization: Bearer opaque_token-123" };
+      expect(scrubSentryEvent(event)?.message).not.toContain("opaque_token-123");
+    });
+
+    it("redacts contract addresses and amount fields in contexts", () => {
+      const event: TestSentryEvent = {
+        contexts: { deposit: { amount: "250.5", vault: WALLET } },
+      };
+      const out = scrubSentryEvent(event);
+      expect(JSON.stringify(out)).not.toContain("250.5");
+      expect(JSON.stringify(out)).not.toContain(WALLET);
+    });
+
+    it("drops user PII and the request query string", () => {
+      const event: TestSentryEvent = {
+        user: { id: "u1", email: "a@b.c", ip_address: "1.2.3.4" },
+        request: { query_string: `wallet=${WALLET}&amount=100` },
+      };
+      const out = scrubSentryEvent(event);
+      expect(out?.user).toBeUndefined();
+      expect(out?.request?.query_string).toBeUndefined();
+    });
+  });
+
+  describe("scrubSentryBreadcrumb", () => {
+    it("redacts message, data keys and values", () => {
+      const out = scrubSentryBreadcrumb({
+        category: "fetch",
+        message: `GET /positions/${WALLET}`,
+        data: { url: `https://api/x?a=${WALLET}`, amount: 12.5, status_code: 200 },
+      });
+      expect(JSON.stringify(out)).not.toContain(WALLET);
+      expect(out?.data?.amount).toBe("[redacted]");
+      expect(out?.data?.status_code).toBe(200);
+    });
+  });
+
+  describe("sentryPrivacyOptions", () => {
+    it("disables default PII and session replay, and scrubs breadcrumbs", () => {
+      expect(sentryPrivacyOptions.sendDefaultPii).toBe(false);
+      expect(sentryPrivacyOptions.replaysSessionSampleRate).toBe(0);
+      expect(sentryPrivacyOptions.replaysOnErrorSampleRate).toBe(0);
+      const crumb = sentryPrivacyOptions.beforeBreadcrumb({ message: `x ${WALLET}` });
+      expect(crumb?.message).not.toContain(WALLET);
+    });
   });
 });

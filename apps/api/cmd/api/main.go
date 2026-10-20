@@ -1690,6 +1690,17 @@ func run() error {
 	apySvc := service.NewAPYService(apySnapshotRepo)
 	apyHandler := handler.NewAPYHandler(apySvc)
 	apyHandler.Register(mux)
+
+	// Public incident status for the dapp's degraded-mode banner. Cached for
+	// 10s and limited to 60 requests/minute per IP.
+	platformStatus := service.NewPlatformStatusService(systemStateRepository, moneyPathSwitchService, func(ctx context.Context) (uint64, error) {
+		res := stellarpkg.PingSorobanRPC(ctx, depHTTPClient, cfg.Stellar().RPCURL())
+		if !res.OK {
+			return 0, errors.New(res.Error)
+		}
+		return res.LatestLedger, nil
+	})
+	handler.NewStatusHandler(platformStatus, 10*time.Second, 60, time.Minute).Register(mux)
 	apySchedulerCtx, cancelAPYScheduler := context.WithCancel(shutdownCtx)
 	defer cancelAPYScheduler()
 	workers.Add(1)

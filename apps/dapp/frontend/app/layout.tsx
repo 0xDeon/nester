@@ -10,6 +10,7 @@ import { NotificationsToaster } from "@/components/notifications-toaster";
 import { WebSocketProvider } from "@/components/websocket-provider";
 import { ReactQueryProvider } from "@/components/react-query-provider";
 import { OfflineBanner } from "@/components/offline-banner";
+import { StatusBanner } from "@/components/status-banner";
 import { SettingsProvider } from "@/context/settings-context";
 import { LocaleProvider } from "@/context/locale-context";
 import { NetworkProvider } from "@/context/NetworkProvider";
@@ -96,6 +97,7 @@ export default async function RootLayout({
                                                     <ServiceWorkerRegister />
                                                     <OfflineBanner />
                                                     <NetworkBanner />
+                                                    <StatusBanner />
                                                     <PortfolioProvider>
                                                         <WebSocketProvider
                                                             channelsOverride={

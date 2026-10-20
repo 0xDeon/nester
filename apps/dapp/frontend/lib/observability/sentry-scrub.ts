@@ -32,12 +32,15 @@ interface ScrubbableSentryEvent {
     headers?: Record<string, string>;
     cookies?: unknown;
     data?: unknown;
+    query_string?: unknown;
   };
   breadcrumbs?: Array<{
     message?: string;
     data?: Record<string, unknown>;
   }>;
   extra?: Record<string, unknown>;
+  contexts?: Record<string, unknown>;
+  user?: unknown;
   transaction?: string;
 }
 
@@ -102,6 +105,7 @@ export function scrubSentryEvent<T extends object>(event: T): T | null {
       // no safe partial-redaction of either, so they are dropped wholesale.
       delete scrubbable.request.cookies;
       delete scrubbable.request.data;
+      delete scrubbable.request.query_string;
     }
 
     if (scrubbable.breadcrumbs) {
@@ -111,6 +115,13 @@ export function scrubSentryEvent<T extends object>(event: T): T | null {
       }
     }
 
+    if (scrubbable.contexts) {
+      scrubbable.contexts = sanitizeContext(scrubbable.contexts);
+    }
+
+    // IP, email and username are PII; the app identifies no one to Sentry.
+    delete scrubbable.user;
+
     if (scrubbable.extra) {
       scrubbable.extra = sanitizeContext(scrubbable.extra);
     }
@@ -118,6 +129,27 @@ export function scrubSentryEvent<T extends object>(event: T): T | null {
     return event;
   } catch {
     // Scrubbing must never let an unscrubbed event through.
+    return null;
+  }
+}
+
+interface ScrubbableBreadcrumb {
+  message?: string;
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Sentry `beforeBreadcrumb` gate. Breadcrumbs (fetch/XHR URLs, console output,
+ * UI clicks) are captured as they happen, so they are scrubbed at capture time
+ * as well as in `beforeSend`. Never throws: a failure drops the breadcrumb.
+ */
+export function scrubSentryBreadcrumb<T extends object>(breadcrumb: T): T | null {
+  try {
+    const crumb = breadcrumb as ScrubbableBreadcrumb;
+    if (crumb.message) crumb.message = sanitizeText(crumb.message);
+    if (crumb.data) crumb.data = sanitizeContext(crumb.data);
+    return breadcrumb;
+  } catch {
     return null;
   }
 }
