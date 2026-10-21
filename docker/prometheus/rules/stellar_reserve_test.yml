@@ -1,0 +1,55 @@
+# promtool unit tests for the mainnet operational account reserve alert
+# (nester#1392, moved into the evaluated rule set by nester#1525).
+
+rule_files:
+  - stellar_reserve.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Balance comfortably above the safe reserve threshold: no alert.
+  - interval: 1m
+    name: balance above safe reserve does not alert
+    input_series:
+      - series: 'nester_stellar_account_balance_xlm'
+        values: '100x10'
+      - series: 'nester_stellar_account_safe_reserve_xlm'
+        values: '20x10'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: StellarOperationalAccountLowReserve
+        exp_alerts: []
+
+  # Balance below the safe reserve threshold but for less than the `for: 5m`
+  # window must not alert yet — a single scrape dip should not page anyone.
+  - interval: 1m
+    name: a brief dip below the threshold is tolerated
+    input_series:
+      - series: 'nester_stellar_account_balance_xlm'
+        values: '100x5 10x3 100x10'
+      - series: 'nester_stellar_account_safe_reserve_xlm'
+        values: '20x18'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: StellarOperationalAccountLowReserve
+        exp_alerts: []
+
+  # Balance stays below the safe reserve threshold for the full `for: 5m`
+  # window: the alert must fire.
+  - interval: 1m
+    name: a sustained drop below the threshold alerts
+    input_series:
+      - series: 'nester_stellar_account_balance_xlm'
+        values: '100x5 10x30'
+      - series: 'nester_stellar_account_safe_reserve_xlm'
+        values: '20x35'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: StellarOperationalAccountLowReserve
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              network: mainnet
+            exp_annotations:
+              summary: "Stellar operational account balance is below the safe reserve threshold"
+              description: "The mainnet operational account XLM balance is 10, which is below the required safe reserve threshold. Trustlines and sponsorships may fail."
