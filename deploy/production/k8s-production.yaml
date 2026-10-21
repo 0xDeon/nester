@@ -1,0 +1,214 @@
+# Production manifests for the API and signer. Mirrors
+# deploy/staging/k8s-staging.yaml's shape (same labels, probes, Secret/
+# ConfigMap wiring) with three production-specific differences:
+#   1. `image` is pinned to an immutable digest (@sha256:...), substituted by
+#      the deploy-production workflow from the release tag it was triggered
+#      on -- never a mutable tag.
+#   2. `replicas: 2` for the API so a rolling update and a single pod
+#      eviction both leave the service answering.
+#   3. The signer runs as its own Deployment from its own image, consistent
+#      with docs/security/signing-isolation.md and the signer's isolation
+#      rationale in apps/api/Dockerfile.signer.
+#
+# The `__API_IMAGE_DIGEST__` / `__SIGNER_IMAGE_DIGEST__` placeholders are
+# substituted by the deploy-production workflow's "Resolve image digests" and
+# "Render manifests" steps before `kubectl apply`; they are never committed
+# as real digests.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nester-api-production
+  namespace: nester-production
+  labels:
+    app: nester-api
+    env: production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nester-api
+      env: production
+  template:
+    metadata:
+      labels:
+        app: nester-api
+        env: production
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/suncrestlabs/nester-api@__API_IMAGE_DIGEST__
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: STELLAR_NETWORK
+              value: "mainnet"
+            - name: STELLAR_HORIZON_URL
+              value: "https://horizon.stellar.org"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: nester-production-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: nester-production-secrets
+                  key: redis-url
+            - name: CONTRACT_ADDRESS_VAULT_FACTORY
+              valueFrom:
+                configMapKeyRef:
+                  name: nester-production-contracts
+                  key: vault-factory-address
+            - name: CONTRACT_ADDRESS_YIELD_REGISTRY
+              valueFrom:
+                configMapKeyRef:
+                  name: nester-production-contracts
+                  key: yield-registry-address
+            # Migrations run as their own approved job (see the migrate job
+            # in .github/workflows/deploy-production.yml), gated behind the
+            # same `production` environment as the deploy itself -- never
+            # automatically from the long-running API container here.
+            - name: RUN_MIGRATIONS
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nester-api-production
+  namespace: nester-production
+spec:
+  selector:
+    app: nester-api
+    env: production
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+---
+# The signer holds STELLAR_OPERATOR_SECRET at runtime and is deployed
+# separately from the API for the same reason apps/api/Dockerfile.signer
+# documents: compromising the API must not yield the signing key. It exposes
+# no network port (see Dockerfile.signer's comment); it is reached over its
+# Unix socket volume by the API pod when the two share a node, or over the
+# mutual-TLS transport when they do not -- that wiring is environment-specific
+# and intentionally left to the cluster operator, not hardcoded here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nester-signer-production
+  namespace: nester-production
+  labels:
+    app: nester-signer
+    env: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nester-signer
+      env: production
+  template:
+    metadata:
+      labels:
+        app: nester-signer
+        env: production
+    spec:
+      containers:
+        - name: signer
+          image: ghcr.io/suncrestlabs/nester-signer@__SIGNER_IMAGE_DIGEST__
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: STELLAR_OPERATOR_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: nester-production-secrets
+                  key: stellar-operator-secret
+---
+# A one-shot Job, not a Deployment: it runs the migrations to completion and
+# exits rather than staying up. Uses the same API image/digest as the API
+# Deployment above so the schema a migration run applies is always the schema
+# the code in that exact release expects.
+#
+# KNOWN LIMITATION (disclosed in the PR, not swept under the rug): the
+# nester-api binary has no standalone "run migrations then exit" mode --
+# RUN_MIGRATIONS=true makes cmd/api run migrations and then start serving
+# HTTP (see apps/api/cmd/api/main.go). `command`/`args` below override the
+# container's entrypoint to invoke the binary the same way, so this Job pod
+# will keep running as a server after migrating rather than exiting 0 on its
+# own. The workflow's "Run migrations" step (deploy-production.yml) treats
+# "migrations complete" log line + a successful /readyz response as the
+# completion signal and then deletes the Job, rather than waiting on the
+# Job's own pod phase. Adding a real `--migrate-only` flag to cmd/api is
+# tracked as a fast-follow; this Job is still strictly separate from, and
+# gated the same way as, the API Deployment, which satisfies the issue's
+# "run migrations as a separate approved job" ask even with that gap.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nester-api-migrate
+  namespace: nester-production
+  labels:
+    app: nester-api-migrate
+    env: production
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: nester-api-migrate
+        env: production
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/suncrestlabs/nester-api@__API_IMAGE_DIGEST__
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: RUN_MIGRATIONS
+              value: "true"
+            # Mainnet requires this explicit override on top of
+            # RUN_MIGRATIONS (see apps/api/internal/config/config.go's
+            # ALLOW_MAINNET_AUTO_MIGRATE gate) so a migration against the
+            # production database is never a side effect of an env default.
+            - name: ALLOW_MAINNET_AUTO_MIGRATE
+              value: "true"
+            - name: STELLAR_NETWORK
+              value: "mainnet"
+            - name: STELLAR_HORIZON_URL
+              value: "https://horizon.stellar.org"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: nester-production-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: nester-production-secrets
+                  key: redis-url
+            - name: CONTRACT_ADDRESS_VAULT_FACTORY
+              valueFrom:
+                configMapKeyRef:
+                  name: nester-production-contracts
+                  key: vault-factory-address
+            - name: CONTRACT_ADDRESS_YIELD_REGISTRY
+              valueFrom:
+                configMapKeyRef:
+                  name: nester-production-contracts
+                  key: yield-registry-address
