@@ -17,15 +17,23 @@ Each tool runs exactly once per change.
 | All                   | `semgrep`                           | all violations (XSS, injection, etc.)     | `security.yml` / `sast`           |
 | All                   | `CodeQL`                            | all violations                            | `security.yml` / `sast`           |
 | Contracts             | `scripts/contract-audit.sh`         | audit service findings                    | `security.yml` / `contract-audit` |
+| Container images      | `trivy` (api, signer)               | HIGH/CRITICAL with a fix available         | `security.yml` / `image-scan`     |
+
+Container image scanning (#1532) covers the two production Dockerfiles that exist today: `apps/api/Dockerfile` and
+`apps/api/Dockerfile.signer`. The dapp has no production Dockerfile (only `Dockerfile.dev`, it deploys as a built
+Next.js artifact, not a container), so there is nothing to scan for it yet. Image signing (cosign, keyless OIDC) and
+signature verification at deploy time are not implemented: neither image is pushed to a registry in any workflow today
+(`deploy-staging.yml` deploys built binaries, not containers), so there is no release pipeline to attach signing to.
+That remains open until a container-based release pipeline exists.
 
 ## Required status checks
 
 Branch protection on `dev` and `main` requires exactly these checks:
 
-| Check           | Workflow       | What it covers                                      |
-| --------------- | -------------- | --------------------------------------------------- |
-| `CI gate`       | `ci.yml`       | `website`, `dapp`, `api`, `contracts`, `observability` |
-| `Security gate` | `security.yml` | `secrets`, `deps`, `sast`, `sbom`, `contract-audit` |
+| Check           | Workflow       | What it covers                                                  |
+| --------------- | -------------- | ---------------------------------------------------------------|
+| `CI gate`       | `ci.yml`       | `website`, `dapp`, `api`, `contracts`, `observability`          |
+| `Security gate` | `security.yml` | `secrets`, `deps`, `sast`, `image-scan`, `sbom`, `contract-audit` |
 
 Each gate job aggregates every job in its workflow. A job skipped by the path filter counts as a pass; a failed or
 cancelled job fails the gate. Requiring the gates rather than the individual jobs keeps the list well under the limit of
