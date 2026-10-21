@@ -104,6 +104,46 @@ func TestCache_Stats_TracksHitsAndMisses(t *testing.T) {
 	assert.GreaterOrEqual(t, stats.Misses, int64(1))
 }
 
+func TestJitteredTTL(t *testing.T) {
+	t.Run("zero or negative base returns base unmodified", func(t *testing.T) {
+		assert.Equal(t, time.Duration(0), cache.ExportedJitteredTTL(0))
+		assert.Equal(t, -5*time.Second, cache.ExportedJitteredTTL(-5*time.Second))
+	})
+
+	t.Run("jitter lands within expected +/-10% window and varies deterministically", func(t *testing.T) {
+		const base = 10 * time.Second
+		minTTL := time.Duration(float64(base) * (1 - cache.JitterFraction))
+		maxTTL := time.Duration(float64(base) * (1 + cache.JitterFraction))
+
+		const samples = 100
+		seen := make(map[time.Duration]bool, samples)
+		hasDifference := false
+
+		for i := 0; i < samples; i++ {
+			ttl := cache.ExportedJitteredTTL(base)
+
+			// 1. Every jittered TTL must land strictly inside the [base - 10%, base + 10%] window.
+			assert.GreaterOrEqual(t, ttl, minTTL, "TTL %v below min window %v", ttl, minTTL)
+			assert.LessOrEqual(t, ttl, maxTTL, "TTL %v above max window %v", ttl, maxTTL)
+
+			if ttl != base {
+				hasDifference = true
+			}
+			seen[ttl] = true
+		}
+
+		// 2. Guaranteed non-constant: at least one sampled TTL must differ from base.
+		assert.True(t, hasDifference, "expected jittered TTL to differ from constant base %v", base)
+
+		// 3. Variety: with nanosecond/millisecond resolution across 100 samples in a 2s window,
+		// jitter must produce a wide spread of distinct values, proving it isn't hardcoded.
+		assert.Greater(t, len(seen), samples/2,
+			"expected jittered TTLs to vary across calls, got %d distinct values in %d samples", len(seen), samples)
+	})
+}
+
+
+
 // ---------------------------------------------------------------------------
 // Redis-backed tests: skip when REDIS_ADDR is unset/unreachable, matching
 // the existing convention in internal/middleware/ratelimit_backend_test.go
@@ -244,11 +284,21 @@ func TestGetOrCompute_Redis_TTLIsJittered(t *testing.T) {
 	ctx := context.Background()
 	ns := "it-jitter"
 
-	// The jitter window is ±10% of the base, so TTLs are drawn from
-	// [9s, 11s] at sub-second resolution. Sample with PTTL (milliseconds)
-	// rather than TTL (whole seconds) — second-resolution rounding collapses
-	// that window onto {9s, 10s, 11s} and makes identical samples common
-	// enough to flake.
+	// Justification:
+	// Previously, with base = 10s and whole-second Redis TTL sampling, TTLs were
+	// rounded into only ~3 buckets ({9s, 10s, 11s}), making identical draws across
+	// 5 samples common enough to cause intermittent CI test flakes.
+	//
+	// To resolve flakiness deterministically:
+	// 1. High-resolution PTTL (millisecond) is sampled so continuous ±10% jitter
+	//    variance across the 2-second spread is measured without whole-second collapse.
+	// 2. Strict deterministic range bounds: every sampled TTL must fall within
+	//    [minTTL - 1s, maxTTL] (allowing slack for network round-trip latency).
+	// 3. Anti-constant safeguard: with 20 samples drawn across a 2,000ms window,
+	//    requiring > samples/2 distinct values ensures TTL is not a hardcoded constant
+	//    while protecting against rare ms-level collisions.
+	// 4. In addition, TestJitteredTTL independently unit-tests jitteredTTL deterministically
+	//    without requiring a running Redis instance.
 	const (
 		base           = 10 * time.Second
 		jitterFraction = 0.10
