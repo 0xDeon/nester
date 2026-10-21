@@ -12,6 +12,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// wsDialHub issues a ticket and dials the test server, returning the conn.
+func wsDialHub(t *testing.T, hub *Hub, serverURL string) *websocket.Conn {
+	t.Helper()
+	ticket, err := hub.IssueTicket(context.Background(), "user-123", "session-123")
+	if err != nil {
+		t.Fatalf("IssueTicket: %v", err)
+	}
+	wsURL := "ws" + strings.TrimPrefix(serverURL, "http") + "?wsticket=" + ticket
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	return conn
+}
+
 // The DApp keepalive is application-level because browser JavaScript cannot
 // send WebSocket protocol ping frames. These tests pin the server half of
 // that contract: {"action":"ping"} must come back as an EventPong inside the
@@ -27,11 +42,7 @@ func TestClient_AppLevelPingIsAnswered(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=valid-token"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	conn := wsDialHub(t, hub, server.URL)
 	defer conn.Close()
 
 	if err := conn.WriteJSON(ClientMessage{Action: ActionPing}); err != nil {
@@ -60,11 +71,7 @@ func TestClient_PingDoesNotAffectSubscriptions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=valid-token"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	conn := wsDialHub(t, hub, server.URL)
 	defer conn.Close()
 
 	if err := conn.WriteJSON(ClientMessage{Action: ActionSubscribe, Channels: []string{"vault:9"}}); err != nil {
@@ -112,11 +119,7 @@ func TestClient_UnknownActionIsIgnored(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=valid-token"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	conn := wsDialHub(t, hub, server.URL)
 	defer conn.Close()
 
 	if err := conn.WriteJSON(ClientMessage{Action: "not-a-real-action"}); err != nil {
@@ -148,11 +151,7 @@ func TestHub_PongAfterShutdownDoesNotPanic(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=valid-token"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	conn := wsDialHub(t, hub, server.URL)
 	defer conn.Close()
 	time.Sleep(50 * time.Millisecond)
 
