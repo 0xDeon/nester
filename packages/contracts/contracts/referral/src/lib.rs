@@ -46,6 +46,11 @@ const REF_ACCR: Symbol = symbol_short!("REF_ACCR");
 const REF_CLAIM: Symbol = symbol_short!("REF_CLAIM");
 const REF_BGT_X: Symbol = symbol_short!("REF_BGT_X");
 
+/// Minimum remaining ledger count before extending TTL (~7 days).
+pub const TTL_BUMP_THRESHOLD_LEDGERS: u32 = 120_960;
+/// Number of ledgers to extend TTL to upon triggering (~30 days).
+pub const TTL_EXTEND_TO_LEDGERS: u32 = 518_400;
+
 #[contracttype]
 #[derive(Clone)]
 enum DataKey {
@@ -129,26 +134,34 @@ impl ReferralContract {
         if user == referrer {
             panic_with_error!(&env, ContractError::SelfReferral);
         }
-        if env
-            .storage()
-            .instance()
-            .has(&DataKey::Referrer(user.clone()))
-        {
+        let user_ref_key = DataKey::Referrer(user.clone());
+        if env.storage().persistent().has(&user_ref_key) {
             panic_with_error!(&env, ContractError::AlreadyReferred);
         }
+        let referrer_ref_key = DataKey::Referrer(referrer.clone());
         if let Some(referrers_referrer) = env
             .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::Referrer(referrer.clone()))
+            .persistent()
+            .get::<DataKey, Address>(&referrer_ref_key)
         {
+            env.storage().persistent().extend_ttl(
+                &referrer_ref_key,
+                TTL_BUMP_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
             if referrers_referrer == user {
                 panic_with_error!(&env, ContractError::ReferralCycle);
             }
         }
 
         env.storage()
-            .instance()
-            .set(&DataKey::Referrer(user.clone()), &referrer);
+            .persistent()
+            .set(&user_ref_key, &referrer);
+        env.storage().persistent().extend_ttl(
+            &user_ref_key,
+            TTL_BUMP_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
 
         emit_event(&env, REFERRAL, REF_REG, user, referrer);
     }
@@ -181,12 +194,20 @@ impl ReferralContract {
             return;
         }
 
+        let user_ref_key = DataKey::Referrer(referred_user.clone());
         let referrer: Address = match env
             .storage()
-            .instance()
-            .get(&DataKey::Referrer(referred_user.clone()))
+            .persistent()
+            .get(&user_ref_key)
         {
-            Some(r) => r,
+            Some(r) => {
+                env.storage().persistent().extend_ttl(
+                    &user_ref_key,
+                    TTL_BUMP_THRESHOLD_LEDGERS,
+                    TTL_EXTEND_TO_LEDGERS,
+                );
+                r
+            }
             None => return,
         };
 
@@ -232,10 +253,11 @@ impl ReferralContract {
 
         // Per-referrer distinct-referee count cap — only ever consumed the
         // first time a given referred user earns anything.
+        let counted_key = DataKey::CountedTowardCap(referred_user.clone());
         let already_counted = env
             .storage()
-            .instance()
-            .get(&DataKey::CountedTowardCap(referred_user.clone()))
+            .persistent()
+            .get(&counted_key)
             .unwrap_or(false);
         if !already_counted {
             let max_referrals: u32 = env
@@ -243,28 +265,46 @@ impl ReferralContract {
                 .instance()
                 .get(&DataKey::MaxRewardedReferrals)
                 .unwrap_or(0);
+            let count_key = DataKey::ReferredCount(referrer.clone());
             let count: u32 = env
                 .storage()
-                .instance()
-                .get(&DataKey::ReferredCount(referrer.clone()))
+                .persistent()
+                .get(&count_key)
                 .unwrap_or(0);
             if count >= max_referrals {
                 return;
             }
             env.storage()
-                .instance()
-                .set(&DataKey::ReferredCount(referrer.clone()), &(count + 1));
+                .persistent()
+                .set(&count_key, &(count + 1));
+            env.storage().persistent().extend_ttl(
+                &count_key,
+                TTL_BUMP_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
             env.storage()
-                .instance()
-                .set(&DataKey::CountedTowardCap(referred_user.clone()), &true);
+                .persistent()
+                .set(&counted_key, &true);
+            env.storage().persistent().extend_ttl(
+                &counted_key,
+                TTL_BUMP_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
+        } else {
+            env.storage().persistent().extend_ttl(
+                &counted_key,
+                TTL_BUMP_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
         }
 
         // Per-referrer lifetime cap, then global budget — whichever binds
         // tighter wins; never overshoot either.
+        let lifetime_key = DataKey::LifetimeReward(referrer.clone());
         let lifetime: i128 = env
             .storage()
-            .instance()
-            .get(&DataKey::LifetimeReward(referrer.clone()))
+            .persistent()
+            .get(&lifetime_key)
             .unwrap_or(0);
         let max_lifetime: i128 = env
             .storage()
@@ -278,19 +318,30 @@ impl ReferralContract {
             return;
         }
 
-        env.storage().instance().set(
-            &DataKey::LifetimeReward(referrer.clone()),
+        env.storage().persistent().set(
+            &lifetime_key,
             &(lifetime + reward),
         );
+        env.storage().persistent().extend_ttl(
+            &lifetime_key,
+            TTL_BUMP_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
 
+        let balance_key = DataKey::RewardBalance(referrer.clone());
         let balance: i128 = env
             .storage()
-            .instance()
-            .get(&DataKey::RewardBalance(referrer.clone()))
+            .persistent()
+            .get(&balance_key)
             .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::RewardBalance(referrer.clone()),
+        env.storage().persistent().set(
+            &balance_key,
             &(balance + reward),
+        );
+        env.storage().persistent().extend_ttl(
+            &balance_key,
+            TTL_BUMP_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
         );
 
         let new_budget = budget - reward;
@@ -320,10 +371,11 @@ impl ReferralContract {
     pub fn claim_referral_rewards(env: Env, referrer: Address) -> i128 {
         referrer.require_auth();
 
+        let balance_key = DataKey::RewardBalance(referrer.clone());
         let balance: i128 = env
             .storage()
-            .instance()
-            .get(&DataKey::RewardBalance(referrer.clone()))
+            .persistent()
+            .get(&balance_key)
             .unwrap_or(0);
         let min_claim: i128 = env
             .storage()
@@ -335,8 +387,13 @@ impl ReferralContract {
         }
 
         env.storage()
-            .instance()
-            .set(&DataKey::RewardBalance(referrer.clone()), &0i128);
+            .persistent()
+            .set(&balance_key, &0i128);
+        env.storage().persistent().extend_ttl(
+            &balance_key,
+            TTL_BUMP_THRESHOLD_LEDGERS,
+            TTL_EXTEND_TO_LEDGERS,
+        );
 
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         token::Client::new(&env, &token).transfer(
@@ -432,28 +489,55 @@ impl ReferralContract {
     // -----------------------------------------------------------------------
 
     pub fn get_referrer(env: Env, user: Address) -> Option<Address> {
-        env.storage().instance().get(&DataKey::Referrer(user))
+        let key = DataKey::Referrer(user);
+        let referrer = env.storage().persistent().get(&key);
+        if referrer.is_some() {
+            env.storage().persistent().extend_ttl(
+                &key,
+                TTL_BUMP_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
+        }
+        referrer
     }
 
     pub fn get_reward_balance(env: Env, referrer: Address) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::RewardBalance(referrer))
-            .unwrap_or(0)
+        let key = DataKey::RewardBalance(referrer);
+        let balance = env.storage().persistent().get(&key).unwrap_or(0);
+        if env.storage().persistent().has(&key) {
+            env.storage().persistent().extend_ttl(
+                &key,
+                TTL_BUMP_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
+        }
+        balance
     }
 
     pub fn get_lifetime_reward(env: Env, referrer: Address) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::LifetimeReward(referrer))
-            .unwrap_or(0)
+        let key = DataKey::LifetimeReward(referrer);
+        let reward = env.storage().persistent().get(&key).unwrap_or(0);
+        if env.storage().persistent().has(&key) {
+            env.storage().persistent().extend_ttl(
+                &key,
+                TTL_BUMP_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
+        }
+        reward
     }
 
     pub fn get_referred_count(env: Env, referrer: Address) -> u32 {
-        env.storage()
-            .instance()
-            .get(&DataKey::ReferredCount(referrer))
-            .unwrap_or(0)
+        let key = DataKey::ReferredCount(referrer);
+        let count = env.storage().persistent().get(&key).unwrap_or(0);
+        if env.storage().persistent().has(&key) {
+            env.storage().persistent().extend_ttl(
+                &key,
+                TTL_BUMP_THRESHOLD_LEDGERS,
+                TTL_EXTEND_TO_LEDGERS,
+            );
+        }
+        count
     }
 
     pub fn get_budget_remaining(env: Env) -> i128 {
