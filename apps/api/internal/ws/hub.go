@@ -98,6 +98,10 @@ type Hub struct {
 	upgrader       websocket.Upgrader
 	mu             sync.RWMutex
 
+	// tickets issues and redeems single-use WS auth tickets (#1519).
+	// Never nil — falls back to memTicketStore when Redis is unavailable.
+	tickets TicketStore
+
 	// Redis pub/sub fan-out (#828). redis is nil in single-instance
 	// deployments (no REDIS_ADDR) — every method below checks for that and
 	// degrades to purely in-process behavior, identical to today.
@@ -133,6 +137,11 @@ func NewHub(logger *slog.Logger, authFunc func(string) (userID, sessionID string
 		redisTopics:    make(map[string]int),
 		maxConnsPerIP:  maxConnsPerIP,
 		connsByIP:      make(map[string]int),
+	}
+	if rc != nil {
+		h.tickets = NewRedisTicketStore(rc)
+	} else {
+		h.tickets = NewMemTicketStore()
 	}
 	h.upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -621,13 +630,38 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
-	var userID, sessionID string
-	var err error
+// IssueTicket mints a single-use, 30-second auth ticket for the given user.
+// Callers must be authenticated before calling this (e.g. behind JWT middleware).
+// The ticket should be passed as the "wsticket" query parameter on the WS
+// upgrade request; long-lived JWTs in the "token" query parameter are rejected.
+func (h *Hub) IssueTicket(ctx context.Context, userID, sessionID string) (string, error) {
+	return h.tickets.Issue(ctx, userID, sessionID)
+}
 
-	if h.authenticator != nil {
-		userID, sessionID, err = h.authenticator(token)
+func (h *Hub) ServeWs(w http.ResponseWriter, r *http.Request) {
+	// Reject long-lived JWTs in the query string (#1519): they end up in
+	// proxy logs, CDN access logs, and Sentry breadcrumbs.
+	if r.URL.Query().Get("token") != "" {
+		h.logger.Warn("websocket: rejected long-lived token in query string")
+		http.Error(w, "Use POST /api/v1/ws/ticket to obtain a short-lived ticket", http.StatusBadRequest)
+		return
+	}
+
+	var userID, sessionID string
+
+	ticket := r.URL.Query().Get("wsticket")
+	if ticket != "" {
+		uid, sid, err := h.tickets.Redeem(r.Context(), ticket)
+		if err != nil {
+			h.logger.Warn("websocket: invalid or expired ticket", "error", err)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID, sessionID = uid, sid
+	} else if h.authenticator != nil {
+		// Fallback: allow the authenticator for non-ticket paths (e.g. tests).
+		var err error
+		userID, sessionID, err = h.authenticator("")
 		if err != nil {
 			h.logger.Warn("websocket unauthorized", "error", err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)

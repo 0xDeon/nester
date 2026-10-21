@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -81,7 +80,11 @@ func TestHub_Integration(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=valid-token"
+	ticket, err := hub.IssueTicket(context.Background(), "user-123", "session-123")
+	if err != nil {
+		t.Fatalf("IssueTicket: %v", err)
+	}
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=" + ticket
 	dialer := websocket.Dialer{}
 	conn, resp, err := dialer.Dial(wsURL, nil)
 	if err != nil {
@@ -134,12 +137,15 @@ func TestHub_UnauthorizedReject(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=invalid"
+	// No ticket and no wsticket param — the fallback authenticator gets called
+	// with an empty token; newTestHub's authenticator accepts "" as valid, so
+	// use a fabricated unknown ticket to trigger a 401.
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=bad-ticket"
 	dialer := websocket.Dialer{}
 	_, resp, err := dialer.Dial(wsURL, nil)
 
 	if err == nil {
-		t.Fatalf("Expected connection failure on invalid token")
+		t.Fatalf("Expected connection failure on invalid ticket")
 	}
 	if resp != nil && resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("Expected 401 Unauthorized, got %d", resp.StatusCode)
@@ -204,7 +210,12 @@ func TestHub_broadcastEvent_disconnectedClient(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=valid"
+	tk, err := hub.IssueTicket(context.Background(), "user-123", "session-123")
+	if err != nil {
+		cancel()
+		t.Fatalf("IssueTicket: %v", err)
+	}
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=" + tk
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		cancel()
@@ -245,7 +256,11 @@ func TestHub_gracefulShutdown_allClientsDisconnected(t *testing.T) {
 	}()
 
 	dial := func() *websocket.Conn {
-		wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=valid"
+		tk, err := hub.IssueTicket(context.Background(), "user-123", "session-123")
+		if err != nil {
+			t.Fatalf("IssueTicket: %v", err)
+		}
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=" + tk
 		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 		if err != nil {
 			t.Fatalf("dial failed: %v", err)
@@ -304,26 +319,24 @@ func TestHub_CrossUserSubscriptionRejection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	// Authenticator: token "user-alice" authenticates as user ID "user-alice"
-	// token "user-bob" authenticates as user ID "user-bob"
-	hub.authenticator = func(token string) (userID, sessionID string, err error) {
-		if token == "invalid" {
-			return "", "", fmt.Errorf("invalid token")
-		}
-		// Simple mock: token becomes the userID
-		return token, token + "-session", nil
+	// Alice connects via ticket
+	aliceTicket, err := hub.IssueTicket(context.Background(), "user-alice", "user-alice-session")
+	if err != nil {
+		t.Fatalf("IssueTicket alice: %v", err)
 	}
-
-	// Alice connects
-	aliceURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=user-alice"
+	aliceURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=" + aliceTicket
 	aliceConn, resp, err := websocket.DefaultDialer.Dial(aliceURL, nil)
 	if err != nil {
 		t.Fatalf("Alice failed to connect: %v, Response: %v", err, resp)
 	}
 	defer aliceConn.Close()
 
-	// Bob connects
-	bobURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=user-bob"
+	// Bob connects via ticket
+	bobTicket, err := hub.IssueTicket(context.Background(), "user-bob", "user-bob-session")
+	if err != nil {
+		t.Fatalf("IssueTicket bob: %v", err)
+	}
+	bobURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=" + bobTicket
 	bobConn, resp, err := websocket.DefaultDialer.Dial(bobURL, nil)
 	if err != nil {
 		t.Fatalf("Bob failed to connect: %v, Response: %v", err, resp)

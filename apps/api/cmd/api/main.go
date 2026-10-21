@@ -1684,6 +1684,22 @@ func run() error {
 	performanceSnapshotsHandler.Register(mux)
 
 	mux.HandleFunc("GET /ws", wsHub.ServeWs)
+	// POST /api/v1/ws/ticket — issues a single-use, 30-second ticket so the
+	// WS upgrade never needs a long-lived JWT in the query string (#1519).
+	mux.HandleFunc("POST /api/v1/ws/ticket", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := auth.GetUserFromContext(r.Context())
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ticket, err := wsHub.IssueTicket(r.Context(), user.ID, user.SessionID)
+		if err != nil {
+			http.Error(w, "could not issue ticket", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"ticket":%q}`, ticket)
+	})
 
 	// APY snapshot scheduler and history endpoint (apySnapshotRepo is
 	// constructed earlier, alongside the deterioration engine wiring above).
