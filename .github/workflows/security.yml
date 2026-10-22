@@ -278,6 +278,52 @@ jobs:
       - name: Analyze
         uses: github/codeql-action/analyze@f02afd42b08e9c7fd2198fe321a96e6b3867a0fd # v3
 
+  # Builds the API and signer images (the two production Dockerfiles that
+  # exist today: apps/api/Dockerfile and apps/api/Dockerfile.signer) and
+  # scans them for OS/package-level CVEs the source-level scans above never
+  # see (#1532). The dapp has no production Dockerfile yet (only
+  # Dockerfile.dev), it deploys as a built Next.js artifact, not a container,
+  # per .github/workflows/deploy-staging.yml, so there is nothing to scan or
+  # sign for it until that changes.
+  #
+  # Images are built and scanned here but not pushed to a registry: no
+  # release/push pipeline exists yet for either image (deploy-staging.yml
+  # deploys built binaries directly, not containers), so there is nothing to
+  # attach cosign signing or signature verification to. That half of this
+  # issue's acceptance criteria needs the release pipeline to exist first;
+  # tracked as a follow-up rather than attempted against infrastructure that
+  # isn't there.
+  image-scan:
+    name: Image scan (Trivy)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+          - name: signer
+            dockerfile: apps/api/Dockerfile.signer
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build ${{ matrix.name }} image
+        run: |
+          docker build \
+            -f ${{ matrix.dockerfile }} \
+            -t nester-${{ matrix.name }}:scan \
+            apps/api
+
+      - name: Scan ${{ matrix.name }} image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: "nester-${{ matrix.name }}:scan"
+          format: "table"
+          severity: "HIGH,CRITICAL"
+          ignore-unfixed: true
+          exit-code: "1"
+
   sbom:
     name: SBOM
     needs: changes
@@ -362,7 +408,7 @@ jobs:
   # any job blocks the merge.
   security-gate:
     name: Security gate
-    needs: [changes, secrets, deps, sast, sbom, contract-audit]
+    needs: [changes, secrets, deps, sast, image-scan, sbom, contract-audit]
     if: always()
     runs-on: ubuntu-latest
     steps:
