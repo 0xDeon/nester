@@ -145,7 +145,7 @@ function parseRegister(content) {
     if (!currentEntry) continue;
     
     // Match status line: - **Status:** Resolved (may have spaces like "Needs more info")
-    const statusMatch = line.match(/^- \*\*Status:\*\*\s+(.+?)(?:\s+|$)/);
+    const statusMatch = line.match(/^- \*\*Status:\*\*\s+(.+?)\s*$/);
     if (statusMatch) {
       currentEntry.status = statusMatch[1].trim();
       continue;

@@ -1,10 +1,10 @@
 {
-  "timestamp": "2026-08-26T23:27:54.372Z",
-  "totalEntries": 46,
+  "timestamp": "2026-10-21T23:29:42.182Z",
+  "totalEntries": 80,
   "summary": {
-    "resolved": 25,
-    "open": 21,
-    "needsMoreInfo": 0
+    "resolved": 53,
+    "open": 26,
+    "needsMoreInfo": 1
   },
   "issues": [
     {
@@ -189,6 +189,146 @@
       "id": "CI-07",
       "title": "govulncheck",
       "evidence": "ci: security::govulncheck"
+    },
+    {
+      "id": "AUDIT-255",
+      "title": "CSP configured on dapp frontend",
+      "evidence": "file: apps/dapp/frontend/proxy.ts#L6-L28, test: apps/dapp/frontend/tests/security-headers.spec.ts::sends CSP and hardening headers"
+    },
+    {
+      "id": "AUDIT-1133",
+      "title": "Vault storage TTL strategy",
+      "evidence": "file: packages/contracts/contracts/vault/src/lib.rs#L1757-L1780, test: packages/contracts/tests/integration/src/integration/lifecycle_tests.rs::test_storage_ttl_persistence_after_long_ledger_advance"
+    },
+    {
+      "id": "AUDIT-806",
+      "title": "Timelock-governed upgradeability for vault/registry WASM",
+      "evidence": "file: packages/contracts/contracts/vault/src/lib.rs#L5218-L5241"
+    },
+    {
+      "id": "AUDIT-1371",
+      "title": "Mainnet env isolated from testnet secrets/RPC",
+      "evidence": "file: apps/api/internal/config/config_stellar_test.go#L29-L135"
+    },
+    {
+      "id": "AUDIT-1373",
+      "title": "Timelocked upgrade proxy with public delay window",
+      "evidence": "file: packages/contracts/contracts/timelock/src/lib.rs#L129-L352"
+    },
+    {
+      "id": "AUDIT-1375",
+      "title": "Incident response runbook for exploit/fund-loss",
+      "evidence": "file: docs/security/incident-response.md#L1-L30"
+    },
+    {
+      "id": "AUDIT-1376",
+      "title": "Mainnet-only TVL cap at deposit",
+      "evidence": "file: apps/api/internal/service/vault_tvl_cap.go#L13-L38, file: apps/api/internal/handler/vault_handler.go#L748-L803"
+    },
+    {
+      "id": "AUDIT-1377",
+      "title": "Withdrawal circuit breaker on outflow rate",
+      "evidence": "file: apps/api/internal/service/vault_service.go#L1028-L1038, test: apps/api/internal/service/vault_service_withdrawal_breaker_test.go::TestWithdrawalCircuitBreakerHaltsVault"
+    },
+    {
+      "id": "AUDIT-1378",
+      "title": "On-call paging for mainnet money-path alerts",
+      "evidence": "file: docker/alertmanager/alertmanager.yml#L47-L107"
+    },
+    {
+      "id": "AUDIT-1379",
+      "title": "Real-time balance/TVL dashboard",
+      "evidence": "file: docker/grafana/dashboards/slo-mainnet-operations.json"
+    },
+    {
+      "id": "AUDIT-1380",
+      "title": "Mainnet launch go/no-go checklist",
+      "evidence": "file: docs/LAUNCH_CHECKLIST.md"
+    },
+    {
+      "id": "AUDIT-1381",
+      "title": "Property-based test of share-price invariant",
+      "evidence": "test: packages/contracts/tests/integration/src/integration/property_tests.rs::prop_withdrawals_alone_never_reduce_share_price"
+    },
+    {
+      "id": "AUDIT-1382",
+      "title": "Dry-run deploy simulation against mainnet fork",
+      "evidence": "file: scripts/mainnet-deploy-dryrun.sh#L1-L22, file: docs/security/mainnet-deploy-dryrun.md"
+    },
+    {
+      "id": "AUDIT-1384",
+      "title": "Automated encrypted backup with tested restore",
+      "evidence": "file: docs/observability/runbooks/database-restore-runbook.md, file: Makefile#L40-L41"
+    },
+    {
+      "id": "AUDIT-1385",
+      "title": "Mainnet fee-estimation guardrail",
+      "evidence": "file: apps/api/internal/stellar/fee_guardrail.go, test: apps/api/internal/stellar/fee_guardrail_test.go::TestFeeGuardrail_MainnetExceeded"
+    },
+    {
+      "id": "AUDIT-1387",
+      "title": "Emergency pause independent of full multisig delay",
+      "evidence": "file: packages/contracts/contracts/vault/src/lib.rs#L2712-L2715"
+    },
+    {
+      "id": "AUDIT-1389",
+      "title": "Deposit allowlist/waitlist gate",
+      "evidence": "file: apps/api/internal/service/deposit_allowlist_gate.go#L27, test: apps/api/internal/service/deposit_allowlist_gate_test.go::TestFlagDepositAllowlistGate_CohortAllowed"
+    },
+    {
+      "id": "AUDIT-1391",
+      "title": "Reconciliation drift escalation at dollar threshold",
+      "evidence": "file: apps/api/internal/scheduler/ledger_reconciliation.go#L217-L233"
+    },
+    {
+      "id": "AUDIT-1393",
+      "title": "Rate-limited adapter harvest calls (gas-griefing)",
+      "evidence": "file: packages/contracts/contracts/vault/src/lib.rs#L1974-L1990"
+    },
+    {
+      "id": "AUDIT-1395",
+      "title": "Rollback procedure doc for 24h post-launch bug",
+      "evidence": "file: docs/MAINNET_LAUNCH_ROLLBACK.md#L1-L20"
+    },
+    {
+      "id": "AUDIT-1396",
+      "title": "Separate mainnet/testnet API URLs, no cross-routing",
+      "evidence": "file: apps/api/internal/config/config.go#L1545, test: apps/api/internal/config/config_stellar_test.go::TestStellarNetworkConsistency_ValidMainnet"
+    },
+    {
+      "id": "AUDIT-1399",
+      "title": "Full deploy dry-run on local network matching mainnet",
+      "evidence": "file: scripts/mainnet-deploy-dryrun.sh#L1-L15"
+    },
+    {
+      "id": "AUDIT-1401",
+      "title": "Support/on-call contact escalation tree",
+      "evidence": "file: docs/SUPPORT_ESCALATION.md"
+    },
+    {
+      "id": "AUDIT-1408",
+      "title": "Data retention / PII deletion policy",
+      "evidence": "file: docs/data-retention.md, file: apps/api/internal/scheduler/data_retention.go, test: apps/api/internal/scheduler/data_retention_test.go::TestDataRetentionJob_DeletesOnlyRowsPastRetentionWindow"
+    },
+    {
+      "id": "AUDIT-1409",
+      "title": "Idempotent tx submission retry on RPC timeout",
+      "evidence": "file: apps/api/internal/stellar/submission.go#L200-L203"
+    },
+    {
+      "id": "AUDIT-1411",
+      "title": "Mainnet cost/budget monitoring alerts",
+      "evidence": "file: docs/observability/error-budget-policy.md"
+    },
+    {
+      "id": "AUDIT-1412",
+      "title": "Chaos test for mainnet RPC provider outage",
+      "evidence": "file: apps/api/internal/chaos/transport.go, test: apps/api/internal/chaos/transport_test.go::TestFaultTimeoutEndsOnCallerDeadline"
+    },
+    {
+      "id": "AUDIT-1419",
+      "title": "Post-launch 30-day heightened-monitoring plan",
+      "evidence": "file: docs/POST_LAUNCH_MONITORING.md"
     }
   ]
 }
