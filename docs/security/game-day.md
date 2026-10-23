@@ -161,7 +161,7 @@ procedure.
 | §B.3 evidence preservation | Needs live containers and a database | Whether the `pg_dump` and log-capture commands work as written |
 | §C.3 chain/audit reconciliation | Needs Horizon and real transaction history | The reconciliation that detects key use *outside* the signer — the strongest exfiltration signal |
 | §E.2 audit chain verification | Needs a populated `audit_logs` table | Covered by `internal/audit` unit tests, but not as part of this scenario |
-| §F communication | Involves people | Escalation paths, contact accuracy, disclosure judgement |
+| §F communication | Involves people | Escalation paths, contact accuracy, disclosure judgement — exercise plan now in [`game-day-incident-comms.md`](game-day-incident-comms.md); not yet run |
 | Human factors throughout | A test cannot rehearse them | Whether the runbook is findable and followable at 3am by someone who did not write it |
 
 **Recommended before relying on this runbook in production:** a manual tabletop

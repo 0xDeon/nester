@@ -73,7 +73,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: ./.github/actions/setup
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
+
+      - uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
         with:
           node: "true"
           install: "false"
@@ -108,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: ./.github/actions/setup
+      - uses: actions/setup-go@7b8cf10d4e4a01d4992d18a89f4d7dc5a3e6d6f4 # v4.3.0
         with:
           go: "true"
 
@@ -162,14 +164,14 @@ jobs:
 
       - name: Download dApp artifacts
         if: needs.build-dapp.result == 'success'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dapp-build
           path: apps/dapp/frontend/.next/
 
       - name: Download API artifacts
         if: needs.build-api.result == 'success'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: api-build
           path: apps/api/
@@ -267,7 +269,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - uses: ./.github/actions/setup
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
+
+      - uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
         with:
           node: "true"
 
@@ -364,7 +368,7 @@ jobs:
 
       - name: Comment on deployment PR (if applicable)
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const status = "${{ steps.summary.outputs.status }}";
@@ -379,7 +383,7 @@ jobs:
 
       - name: Notify Slack on failure
         if: failure() || needs.smoke-test.result != 'success'
-        uses: slackapi/slack-github-action@fcfb566f8b0aab22203f066d80ca1d7e4b5d05b3 # v1
+        uses: slackapi/slack-github-action@fcfb566f8b0aab22203f066d80ca1d7e4b5d05b3 # v1.27.1
         with:
           payload: |
             {

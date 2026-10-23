@@ -109,10 +109,35 @@ jobs:
       - name: Run gitleaks
         run: gitleaks detect --source . --redact --no-banner --config .gitleaks.toml
 
-  deps:
-    name: Deps (${{ matrix.tool }})
-    needs: changes
-    if: needs.changes.outputs.deps_matrix != '[]'
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
+
+      # No `cache: pnpm` here on purpose. This job never runs `pnpm install`
+      # (audit resolves straight from the lockfile), so the pnpm store is
+      # never created and the post-job cache save fails the whole job with
+      # "Path Validation Error: Path(s) specified in the action for caching
+      # do(es) not exist" even when every audit step passed.
+      - name: Setup Node
+        uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
+        with:
+          node-version: 22
+
+      # This is a pnpm workspace: the single pnpm-lock.yaml at the repo root
+      # covers every package, and no package-lock.json exists anywhere. The
+      # audit therefore runs once from the root rather than per-directory.
+      - name: Warn on moderate and above vulnerabilities
+        run: pnpm audit --audit-level=moderate || true
+
+      # Enforced, not suppressed. Repairing this job (it had been failing on
+      # ENOLOCK rather than actually auditing) exposed 203 findings; the 6
+      # criticals are now fixed outright via root pnpm.overrides and the jspdf
+      # 4.x bump, leaving 0 critical. The residual 76 high / 60 moderate are
+      # transitive-only under Expo/react-native and Trezor and need upstream
+      # releases; #1025 raises this gate to `high` when they land.
+      - name: Fail on critical vulnerabilities
+        run: pnpm audit --audit-level=critical
+
+  audit-go:
+    name: Dependency Audit (Go)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

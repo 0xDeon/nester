@@ -428,6 +428,10 @@ exploitation path, key material or identifiers beyond what is already public
 on-chain, internal hostnames or infrastructure detail, or speculation about
 attribution.
 
+Pre-approved message templates for each stage of disclosure — written and
+approved before an incident, not drafted under pressure during one — are in
+§H.
+
 ### F.3 Timeline expectations
 
 | Point | Target |
@@ -449,6 +453,173 @@ attribution.
 - [ ] Re-run the game day (`docs/security/game-day.md`) against the updated
       runbook
 - [ ] If detection was slow, wire the §A.1 signals into alerting
+
+---
+
+## H. Public communication templates
+
+Written and pre-approved now, so that the first public message in a real
+incident is read off this document rather than composed under pressure. These
+apply beyond signing-key compromise specifically — use them for any
+fund-safety or availability incident: an exploit, an emergency pause (the
+`PUT /api/v1/admin/maintenance` / `POST /api/v1/admin/vaults/{id}/pause`
+switches from [`SUPPORT_ESCALATION.md`](../SUPPORT_ESCALATION.md)), or
+degraded service (see
+[`money-path-incident.md`](../observability/runbooks/money-path-incident.md)).
+
+### H.1 Channels
+
+| Channel | Status | Use for |
+|---|---|---|
+| Official Discord `#announcements` | Live today ([`SUPPORT_ESCALATION.md`](../SUPPORT_ESCALATION.md) §1) | All stages — primary channel until a status page exists |
+| Status page | **Not yet live.** Stand up before mainnet launch per [`LAUNCH_CHECKLIST.md`](../LAUNCH_CHECKLIST.md) item 3 | All stages, once available — becomes the canonical source the other channels link to |
+| X (Twitter) | Official account, reach only | Paused/resolved/post-mortem — high-visibility stages, not the low-signal "still investigating" updates |
+| Telegram | Community channel, if staffed to moderate during an incident | Same stages as Discord |
+
+Do not originate a disclosure on a channel that isn't staffed to answer
+follow-up questions — silence after a scary message is worse than the delay of
+posting once support can actually monitor it.
+
+### H.2 Approver by severity
+
+Severity tiers match [`SUPPORT_ESCALATION.md`](../SUPPORT_ESCALATION.md) §2.
+The approver must sign off on the **filled-in** message (not just the
+template) before it goes out — placeholders are easy to miss under pressure.
+
+| Severity | Required approver before posting |
+|---|---|
+| P1 — active fund loss, exploit, global pause | Tier 4: Core Protocol Maintainer **and** Security Lead, both |
+| P2 — major, partial/single-vault impact | Tier 3 on-call engineer **and** Tier 4 Security Lead |
+| P3 — moderate, no fund impact | Tier 2 escalation lead |
+| Post-mortem (any severity) | Core Protocol Maintainers — published only after the Tier 4 internal review in §G is complete |
+
+If the named approver is unreachable, escalate to the next tier up rather than
+posting unapproved — these templates are pre-approved in *shape*, not as a
+substitute for sign-off on content and timing.
+
+### H.3 Templates
+
+Fill every `[BRACKETED]` field. An unfilled bracket reads worse than a short
+delay to fill it in correctly.
+
+---
+
+**1. Deposits paused**
+
+> ⚠️ We've temporarily paused [deposits / withdrawals / all activity] on
+> [vault name / "all Nester vaults"] as a precaution while we investigate
+> [a reported issue / unusual activity]. No action is needed from you. Your
+> existing positions are unaffected by the pause itself. We'll share an
+> update within [TIMEFRAME, default 1 hour].
+
+- **Can say:** that a pause is in effect, what it does and doesn't restrict,
+  that it's precautionary, when the next update lands.
+- **Cannot say:** the suspected cause, whether funds are at risk (use
+  "investigating" below until §C blast-radius assessment is done), any
+  technical detail about the trigger.
+- **Approver:** per H.2, by severity. A pause is itself the containment
+  action (§B), so this message can go out as soon as the approver confirms —
+  it does not wait for blast-radius assessment.
+
+---
+
+**2. Investigating**
+
+> We're investigating [a reported issue / unusual activity] affecting
+> [scope]. [Deposits/withdrawals] remain paused while we work through it.
+> We do not yet have a complete picture and will not speculate on cause or
+> impact until we do. Next update by [TIMEFRAME].
+
+- **Can say:** that investigation is ongoing, current containment state,
+  when the next update lands.
+- **Cannot say:** anything from §C before it's confirmed — a wrong early
+  guess ("funds are safe" / "it's contained") that gets walked back later
+  costs more trust than silence.
+- **Approver:** per H.2. Re-post on every missed timeframe rather than go
+  quiet — "still investigating, next update by [new time]" is a valid update.
+
+---
+
+**3. Funds safe**
+
+> Following our investigation, we've confirmed that **user funds are not at
+> risk**. [One-sentence factual description of what happened, no exploitation
+> detail.] [Deposits/withdrawals] [are being restored / remain paused while
+> we complete X]. Thank you for your patience.
+
+- **Can say:** this only after §C's blast-radius assessment and, where
+  relevant, §E's recovery verification are both complete — not on an early
+  signal that looks reassuring.
+- **Cannot say:** the exploitation path or vulnerability detail (§F.2) — "not
+  at risk" does not require explaining how it could have gone wrong.
+- **Approver:** Tier 4 Security Lead specifically — this is the highest-cost
+  message to get wrong, since reversing it after the fact is the worst
+  outcome in this whole template set.
+
+---
+
+**4. Partial impairment**
+
+> We've identified that [scope: which vault/users] experienced
+> [plain-language impact — e.g. "a loss of funds"]. We are [continuing to
+> investigate / have identified the cause] and will update affected users
+> directly at [ADDRESS/CHANNEL] with specifics. [Remediation plan if decided,
+> otherwise: "We are determining the appropriate remediation and will share a
+> plan by [TIMEFRAME]."] We take full responsibility for this and will
+> publish a complete post-mortem once the response is concluded.
+
+- **Can say:** that impact occurred and its scope, that affected users will
+  be contacted directly, a remediation timeline once one exists.
+- **Cannot say:** exact per-user amounts publicly (direct message only),
+  attribution/blame to a third party before it's confirmed, a remediation
+  commitment the team cannot actually deliver.
+- **Approver:** Tier 4 Core Protocol Maintainer **and** Security Lead, both —
+  and loop in whoever owns the legal/regulatory call per F.2 before this one
+  goes out, not after.
+
+---
+
+**5. Resolved**
+
+> This incident is now resolved. [One-paragraph plain-language summary: what
+> happened, what we did, current state.] [Deposits/withdrawals] are fully
+> restored. [If applicable: affected users have been contacted directly
+> regarding remediation.] A full post-mortem will be published at
+> [LOCATION] by [DATE, default within 1 week per F.3].
+
+- **Can say:** current state is fully normal, a plain-language summary
+  without exploitation detail, where/when the post-mortem lands.
+- **Cannot say:** declare "resolved" before §E's recovery verification
+  (bounded reversible operation, confirmed on-chain) — a health check alone
+  is not resolution.
+- **Approver:** per H.2.
+
+---
+
+**6. Post-mortem**
+
+> Published separately as a full document, not a status update. Must cover:
+> timeline (detection → containment → assessment → recovery, real
+> timestamps), root cause, user impact and remediation, and concrete fixes
+> made or planned. Link to it from the "resolved" message once published
+> (§F.3 targets within 1 week). Technical detail that was withheld during the
+> open incident (§F.2) can appear here, once the vector is closed.
+
+- **Approver:** Core Protocol Maintainers, after the §G internal review is
+  complete — this is explicitly gated on §G, not timed independently.
+
+### H.4 Game day
+
+These templates are rehearsed, not just written. `docs/security/game-day.md`
+§4 identifies communication as the one area its executable harness provides
+no coverage for at all — filling that gap is a manual tabletop exercise:
+pick one template (rotate which one each run), run the approver chain in
+H.2 against a simulated incident, and post the filled-in result to a private
+test channel (a team-only Discord server/channel, not `#announcements`).
+Measure time from "incident declared" to "message posted," and record
+whether the right approver was reachable and the right fields got filled in
+correctly. See `docs/security/game-day-incident-comms.md` for the exercise
+plan and the first run's record.
 
 ---
 
