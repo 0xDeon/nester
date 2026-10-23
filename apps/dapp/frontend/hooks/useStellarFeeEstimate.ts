@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
   estimateDepositFee,
   estimateWithdrawFee,
-  type DepositParams,
+  type DepositQuoteParams,
   type NetworkFeeEstimate,
   type WithdrawParams,
 } from "@/lib/stellar/transaction";
@@ -13,7 +13,7 @@ const DEBOUNCE_MS = 500;
 
 export function useStellarFeeEstimate(
   kind: "deposit" | "withdraw",
-  params: DepositParams | WithdrawParams | null,
+  params: DepositQuoteParams | WithdrawParams | null,
   enabled: boolean
 ) {
   const [estimate, setEstimate] = useState<NetworkFeeEstimate | null>(null);
@@ -32,7 +32,7 @@ export function useStellarFeeEstimate(
       try {
         const result =
           kind === "deposit"
-            ? await estimateDepositFee(params as DepositParams)
+            ? await estimateDepositFee(params as DepositQuoteParams)
             : await estimateWithdrawFee(params as WithdrawParams);
         if (!cancelled) setEstimate(result);
       } catch {

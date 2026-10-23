@@ -49,7 +49,7 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // Aave specific brand colors if needed directly
+        // Brand accent colors
         brand: {
           purple: "#B6509E",
           cyan: "#2EBAC6",

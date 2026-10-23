@@ -16,9 +16,14 @@ const STELLAR_SECRET = /\b[S][A-Z2-7]{55}\b/g;
 const STELLAR_MUXED = /\b[M][A-Z2-7]{68}\b/g;
 /** Hex transaction hashes / raw XDR-ish blobs. Bounded to avoid backtracking. */
 const HEX_BLOB = /\b[0-9a-fA-F]{40,128}\b/g;
-/** `Bearer eyJ...` and bare JWTs. */
-const BEARER = /\bBearer\s+[\w-]+\.[\w-]+\.[\w-]+/gi;
+/** `Bearer <token>` (JWT or opaque) and bare JWTs. */
+const BEARER = /\bBearer\s+[\w.~+/=-]{1,2048}/gi;
 const JWT = /\b[\w-]{8,256}\.[\w-]{8,1024}\.[\w-]{8,256}\b/g;
+/**
+ * Base64 blobs such as signed transaction XDR envelopes. Long enough that
+ * ordinary words and ids never match; bounded to avoid backtracking.
+ */
+const BASE64_BLOB = /[A-Za-z0-9+/]{80,4096}={0,2}/g;
 /**
  * Anything that looks like a currency amount, with or without a symbol.
  * Quantifiers are bounded so the pattern cannot backtrack pathologically on a
@@ -82,6 +87,7 @@ export function sanitizeText(input: string): string {
     .replace(STELLAR_MUXED, REDACTED)
     .replace(STELLAR_ADDRESS, REDACTED)
     .replace(JWT, REDACTED)
+    .replace(BASE64_BLOB, REDACTED)
     .replace(HEX_BLOB, REDACTED)
     .replace(AMOUNT, REDACTED);
 }

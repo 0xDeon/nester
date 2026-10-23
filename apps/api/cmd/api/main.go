@@ -1684,12 +1684,39 @@ func run() error {
 	performanceSnapshotsHandler.Register(mux)
 
 	mux.HandleFunc("GET /ws", wsHub.ServeWs)
+	// POST /api/v1/ws/ticket — issues a single-use, 30-second ticket so the
+	// WS upgrade never needs a long-lived JWT in the query string (#1519).
+	mux.HandleFunc("POST /api/v1/ws/ticket", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := auth.GetUserFromContext(r.Context())
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ticket, err := wsHub.IssueTicket(r.Context(), user.ID, user.SessionID)
+		if err != nil {
+			http.Error(w, "could not issue ticket", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"ticket":%q}`, ticket)
+	})
 
 	// APY snapshot scheduler and history endpoint (apySnapshotRepo is
 	// constructed earlier, alongside the deterioration engine wiring above).
 	apySvc := service.NewAPYService(apySnapshotRepo)
 	apyHandler := handler.NewAPYHandler(apySvc)
 	apyHandler.Register(mux)
+
+	// Public incident status for the dapp's degraded-mode banner. Cached for
+	// 10s and limited to 60 requests/minute per IP.
+	platformStatus := service.NewPlatformStatusService(systemStateRepository, moneyPathSwitchService, func(ctx context.Context) (uint64, error) {
+		res := stellarpkg.PingSorobanRPC(ctx, depHTTPClient, cfg.Stellar().RPCURL())
+		if !res.OK {
+			return 0, errors.New(res.Error)
+		}
+		return res.LatestLedger, nil
+	})
+	handler.NewStatusHandler(platformStatus, 10*time.Second, 60, time.Minute).Register(mux)
 	apySchedulerCtx, cancelAPYScheduler := context.WithCancel(shutdownCtx)
 	defer cancelAPYScheduler()
 	workers.Add(1)

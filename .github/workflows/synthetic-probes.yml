@@ -48,7 +48,7 @@ jobs:
       # A missing secret must never let a probe fall back to localhost or to
       # production. probe.py refuses to guess a target on its own; this guard
       # keeps the run from being reported as a failure when it is simply not
-      # configured yet. Same pattern as the load-soak workflow.
+      # configured yet. Same pattern as the soak job in nightly.yml.
       - name: Check staging target is configured
         id: guard
         env:

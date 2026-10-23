@@ -17,7 +17,7 @@ import {
   setAccessToken,
   setUserId as writeUserId,
   clearTokens,
-  ACCESS_TOKEN_STORAGE_KEY,
+  subscribeAccessToken,
   USER_ID_STORAGE_KEY,
 } from "@/lib/auth/token-store";
 
@@ -117,27 +117,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [address, clearSession]);
 
-  // Pick up an already-active session (e.g. page reload) with proactive refresh.
+  // The access token lives in memory only, so a page reload starts without
+  // one. Recover the session through the httpOnly refresh cookie. Concurrent
+  // callers share one in-flight request (see lib/api/client.ts), so the
+  // refresh token is never rotated twice.
+  const restoreSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const refreshed = await api.auth.refresh();
+      setToken(refreshed.access_token);
+      scheduleProactiveRefresh(refreshed.access_token);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [scheduleProactiveRefresh]);
+
   useEffect(() => {
-    if (token) scheduleProactiveRefresh(token);
+    if (!address || getAccessToken()) return;
+    void restoreSession();
+  }, [address, restoreSession]);
+
+  // Reactive refreshes in the API client write to the token store directly.
+  useEffect(() => subscribeAccessToken((next) => setToken(next || null)), []);
+
+  useEffect(() => {
     return () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync across browser tabs
+  // Sync the user id across browser tabs
   useEffect(() => {
     const handler = (e: StorageEvent) => {
-      if (e.key === ACCESS_TOKEN_STORAGE_KEY) {
-        setToken(e.newValue);
-        if (e.newValue) scheduleProactiveRefresh(e.newValue);
-      }
       if (e.key === USER_ID_STORAGE_KEY) setUserId(e.newValue);
     };
     window.addEventListener("storage", handler);
     return () => window.removeEventListener("storage", handler);
-  }, [scheduleProactiveRefresh]);
+  }, []);
 
   const signIn = useCallback(async () => {
     if (!address || token) return; // already signed in or no wallet
@@ -145,6 +161,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
 
     try {
+      if (await restoreSession()) return;
+
       // 1. Request challenge nonce
       const { challenge } = await api.auth.requestChallenge(address);
 
@@ -210,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSigningIn(false);
     }
-  }, [address, token, scheduleProactiveRefresh]);
+  }, [address, token, scheduleProactiveRefresh, restoreSession]);
 
   const signOut = useCallback(async () => {
     try {

@@ -167,7 +167,7 @@ Nester follows a layered architecture separating concerns across clients, backen
 │  │  vault instances       nVault share token mint/burn    │  │
 │  │                        maturity & penalty logic        │  │
 │  │  Auto-Invest Mandates  Yield Source Adapters           │  │
-│  │  recurring deposit     Blend / Kamino / Aave           │  │
+│  │  recurring deposit     Blend                           │  │
 │  │  authorization         deposit / withdraw / balanceOf  │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                                                             │
@@ -393,12 +393,12 @@ User deposits 1,000 USDC
 │  User receives 1,000 nVault share tokens      │
 │                                               │
 │  Allocation strategy:                         │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐      │
-│  │ Blend   │  │ Kamino  │  │ Aave    │      │
-│  │ 40%     │  │ 35%     │  │ 25%     │      │
-│  │ 400 USDC│  │ 350 USDC│  │ 250 USDC│      │
-│  │ 8.5% APY│  │ 10% APY │  │ 9% APY  │      │
-│  └─────────┘  └─────────┘  └─────────┘      │
+│  ┌──────────┐                                 │
+│  │ Blend    │                                 │
+│  │ 100%     │                                 │
+│  │ 1000 USDC│                                 │
+│  │ 8.5% APY │                                 │
+│  └──────────┘                                 │
 │                                               │
 │  Blended APY: 9.08%                          │
 │  After 1 year: 1,000 → 1,090.80 USDC        │
@@ -550,14 +550,14 @@ Nester's on-chain logic runs on **Stellar's Soroban** platform using Rust smart 
                         │ uses
          ┌──────────────┼──────────────┐
          ▼              ▼              ▼
-┌──────────────┐ ┌────────────┐ ┌────────────┐
-│ Blend        │ │ Kamino     │ │ Aave       │
-│ Adapter      │ │ Adapter    │ │ Adapter    │
-│              │ │            │ │            │
-│ deposit()    │ │ deposit()  │ │ deposit()  │
-│ withdraw()   │ │ withdraw() │ │ withdraw() │
-│ balance_of() │ │ balance_of │ │ balance_of │
-└──────────────┘ └────────────┘ └────────────┘
+┌──────────────┐
+│ Blend        │
+│ Adapter      │
+│              │
+│ deposit()    │
+│ withdraw()   │
+│ balance_of() │
+└──────────────┘
 \`\`\`
 
 ## Workspace Structure
@@ -806,7 +806,7 @@ nDEFI token value tracks:
         title: "Yield Source Adapters",
         content: `# Yield Source Adapters
 
-Each yield source (Blend, Kamino, Aave) has a standardized adapter contract that the vault uses to deposit, withdraw, and check balances.
+Each yield source (currently Blend) has a standardized adapter contract that the vault uses to deposit, withdraw, and check balances.
 
 ## Adapter Interface
 
@@ -867,7 +867,7 @@ The registry contract tracks which adapters are approved, their risk scores, and
 \`\`\`rust
 pub struct YieldSource {
     pub adapter: Address,     // Adapter contract address
-    pub name: String,         // "Blend", "Kamino", etc.
+    pub name: String,         // "Blend", etc.
     pub risk_score: u32,      // 1-10 (1 = lowest risk)
     pub max_allocation: u32,  // Max % of vault this source can hold
     pub is_active: bool,
@@ -990,8 +990,7 @@ curl https://api.nester.finance/api/v1/vaults
             "total_depositors": 45,
             "status": "active",
             "allocations": [
-                { "source": "Blend", "percentage": 60, "apy": 7.0 },
-                { "source": "Aave", "percentage": 40, "apy": 7.5 }
+                { "source": "Blend", "percentage": 100, "apy": 7.0 }
             ]
         },
         {
@@ -1003,9 +1002,7 @@ curl https://api.nester.finance/api/v1/vaults
             "total_depositors": 120,
             "status": "active",
             "allocations": [
-                { "source": "Blend", "percentage": 40, "apy": 8.5 },
-                { "source": "Kamino", "percentage": 35, "apy": 10.0 },
-                { "source": "Aave", "percentage": 25, "apy": 9.0 }
+                { "source": "Blend", "percentage": 100, "apy": 8.5 }
             ]
         }
     ]

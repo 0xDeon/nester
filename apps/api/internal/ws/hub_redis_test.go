@@ -64,9 +64,9 @@ func TestHub_Redis_CrossInstanceDelivery(t *testing.T) {
 
 	channel := "vault:cross-instance-" + t.Name()
 
-	connA := dialAndSubscribe(t, serverA.URL, "tokA", channel)
+	connA := dialAndSubscribe(t, hubA, serverA.URL, "tokA", channel)
 	defer connA.Close()
-	connB := dialAndSubscribe(t, serverB.URL, "tokB", channel)
+	connB := dialAndSubscribe(t, hubB, serverB.URL, "tokB", channel)
 	defer connB.Close()
 
 	// Give both instances a moment to register their Redis subscription.
@@ -84,9 +84,13 @@ func TestHub_Redis_CrossInstanceDelivery(t *testing.T) {
 	assertReceivesOnChannel(t, connB, channel, "hubB's own client")
 }
 
-func dialAndSubscribe(t *testing.T, httpURL, token, channel string) *websocket.Conn {
+func dialAndSubscribe(t *testing.T, hub *Hub, httpURL, userID, channel string) *websocket.Conn {
 	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(httpURL, "http") + "?token=" + token
+	ticket, err := hub.IssueTicket(context.Background(), "user-"+userID, "session-"+userID)
+	if err != nil {
+		t.Fatalf("IssueTicket: %v", err)
+	}
+	wsURL := "ws" + strings.TrimPrefix(httpURL, "http") + "?wsticket=" + ticket
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial %s failed: %v (resp=%v)", httpURL, err, resp)
@@ -124,7 +128,7 @@ func TestHub_Redis_OwnEventNotDoubleDelivered(t *testing.T) {
 	defer server.Close()
 
 	channel := "vault:no-double-delivery-" + t.Name()
-	conn := dialAndSubscribe(t, server.URL, "tok", channel)
+	conn := dialAndSubscribe(t, hub, server.URL, "tok", channel)
 	defer conn.Close()
 
 	time.Sleep(100 * time.Millisecond)
@@ -162,14 +166,14 @@ func TestHub_Redis_ReconnectMovesSubscriptionCleanly(t *testing.T) {
 
 	channel := "vault:reconnect-" + t.Name()
 
-	connA := dialAndSubscribe(t, serverA.URL, "tok", channel)
+	connA := dialAndSubscribe(t, hubA, serverA.URL, "tok", channel)
 	time.Sleep(100 * time.Millisecond)
 
 	// Simulate a drop and reconnect elsewhere.
 	connA.Close()
 	time.Sleep(100 * time.Millisecond)
 
-	connB := dialAndSubscribe(t, serverB.URL, "tok", channel)
+	connB := dialAndSubscribe(t, hubB, serverB.URL, "tok", channel)
 	defer connB.Close()
 	time.Sleep(100 * time.Millisecond)
 
@@ -193,14 +197,16 @@ func TestHub_Redis_PresenceTracksConnectionAndExpiresOnDisconnect(t *testing.T) 
 	server := httptest.NewServer(http.HandlerFunc(hubA.ServeWs))
 	defer server.Close()
 
-	userToken := "presence-user-" + t.Name()
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=" + userToken
+	userID := "user-presence-" + t.Name()
+	ticket, err := hubA.IssueTicket(context.Background(), userID, "session-"+userID)
+	if err != nil {
+		t.Fatalf("IssueTicket: %v", err)
+	}
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=" + ticket
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}
-
-	userID := "user-" + userToken
 	if !waitFor(t, 2*time.Second, func() bool { return hubB.IsUserPresent(context.Background(), userID) }) {
 		t.Fatal("expected hubB to observe user as present via shared redis presence tracking")
 	}
@@ -272,7 +278,11 @@ func TestHub_PerIPConnectionLimit_RejectsBeyondLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(hub.ServeWs))
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=tok1"
+	tk1, err := hub.IssueTicket(context.Background(), "user-tok1", "sess-tok1")
+	if err != nil {
+		t.Fatalf("IssueTicket: %v", err)
+	}
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=" + tk1
 	conn1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("first dial should succeed: %v", err)
@@ -281,7 +291,10 @@ func TestHub_PerIPConnectionLimit_RejectsBeyondLimit(t *testing.T) {
 
 	// All httptest.Server client connections share the same loopback IP, so a
 	// second connection must be rejected under a per-IP limit of 1.
-	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	// Issue a second ticket (the first was consumed) but it should be rejected on IP limit.
+	tk2, _ := hub.IssueTicket(context.Background(), "user-tok2", "sess-tok2")
+	wsURL2 := "ws" + strings.TrimPrefix(server.URL, "http") + "?wsticket=" + tk2
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL2, nil)
 	if err == nil {
 		t.Fatal("expected second connection from the same IP to be rejected")
 	}

@@ -17,12 +17,19 @@ import { usePortfolio } from "@/components/portfolio-provider";
 import { useWallet } from "@/components/wallet-provider";
 import { cn } from "@/lib/utils";
 import { useOfflineStatus } from "@/hooks/useOfflineStatus";
+import { useDepositPreview } from "@/hooks/useDepositPreview";
+import { useSlippage } from "@/hooks/useSlippage";
+import { SlippageControl } from "@/components/slippage-control";
+import { applySlippage } from "@/lib/slippage";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useDepositPreflight } from "@/hooks/useDepositPreflight";
+import { addUsdcTrustline, preflightMessage } from "@/lib/stellar/preflight";
 import { TransactionAnnouncer } from "@/components/vault/transactionAnnouncer";
 import type { Vault as VaultDefinition, MarketStrategy } from "@/lib/types/vault";
 import { vaultsApi } from "@/lib/api/vaults";
 import {
   executeVaultDeposit,
+  resolveDepositMinSharesOut,
   UserRejectedError,
   TransactionFailedError,
   TransactionTimeoutError,
@@ -257,8 +264,53 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
     return null;
   }, [amount, balance, selectedAsset]);
 
+  const { result: preflight, refresh: refreshPreflight, horizonUrl, networkPassphrase } =
+    useDepositPreflight({ address, asset: selectedAsset, amount, enabled: open && !!vault });
+  const [addingTrustline, setAddingTrustline] = useState(false);
+  const [trustlineError, setTrustlineError] = useState("");
+  const preflightBlocked = !!preflight && preflight.status !== "ready";
+  const preflightCopy = preflight ? preflightMessage(preflight) : null;
+
+  const handleAddTrustline = async () => {
+    if (!address) return;
+    setAddingTrustline(true);
+    setTrustlineError("");
+    try {
+      await addUsdcTrustline({ horizonUrl, networkPassphrase, address });
+      refreshPreflight();
+    } catch (err) {
+      setTrustlineError(humanizeError(err));
+    } finally {
+      setAddingTrustline(false);
+    }
+  };
+
   const canSubmit =
-    !!vault && !!address && amount > 0 && !validationError && state === "input" && !isOffline;
+    !!vault && !!address && amount > 0 && !validationError && state === "input" && !isOffline && !preflightBlocked;
+
+  const { bps: slippageBps, setBps: setSlippageBps } = useSlippage();
+  const previewParams = useMemo(() => {
+    if (!vault || !address || amount <= 0 || !/^C[A-Z0-9]{55}$/.test(vault.contractAddress ?? "")) {
+      return null;
+    }
+    return {
+      walletAddress: address,
+      contractId: vault.contractAddress as string,
+      amount: amountInput.trim(),
+    };
+  }, [vault, address, amount, amountInput]);
+  const { preview: depositPreview } = useDepositPreview(
+    previewParams,
+    open && state === "input" && !validationError
+  );
+  const sharesExpected =
+    depositPreview?.available && depositPreview.sharesExpected > BigInt(0)
+      ? Number(depositPreview.sharesExpected) / 1e7
+      : amount;
+  const minSharesReceived =
+    depositPreview?.available && depositPreview.sharesExpected > BigInt(0)
+      ? Number(applySlippage(depositPreview.sharesExpected, slippageBps)) / 1e7
+      : null;
 
   const effectiveApy = selectedStrategy ? selectedStrategy.apy / 100 : (meta ? meta.apy : 0);
   const estimatedYield = amount * effectiveApy;
@@ -305,12 +357,23 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
 
     try {
       setState("pending");
-      const txReceipt = await executeVaultDeposit({
+      const quoteParams = {
         walletAddress: address,
-        vaultId: vault.id,
         contractId: vault.contractAddress,
-        asset: selectedAsset,
         amount: amountInput.trim(),
+      };
+      const { minSharesOut } = await resolveDepositMinSharesOut(
+        quoteParams,
+        slippageBps,
+        depositPreview?.available
+          ? { value: depositPreview.sharesExpected, fetchedAt: depositPreview.fetchedAt }
+          : null
+      );
+      const txReceipt = await executeVaultDeposit({
+        ...quoteParams,
+        vaultId: vault.id,
+        asset: selectedAsset,
+        minSharesOut,
       });
 
       setReceipt(txReceipt);
@@ -503,6 +566,12 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                 )}
               </div>
 
+              <SlippageControl
+                bps={slippageBps}
+                onChange={setSlippageBps}
+                disabled={state !== "input" && state !== "error"}
+              />
+
               {/* Preview */}
               <div className="mt-5 space-y-3 rounded-2xl border border-border bg-secondary/30 p-4">
                 {[
@@ -516,7 +585,11 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                   },
                   {
                     label: "nVault shares to receive",
-                    value: formatCurrency(amount),
+                    value: formatCurrency(sharesExpected),
+                  },
+                  {
+                    label: "Minimum received",
+                    value: minSharesReceived !== null ? `${formatCurrency(minSharesReceived)} nVault shares` : "—",
                   },
                   {
                     label: "Lock period",
@@ -630,6 +703,33 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{errorMsg}</span>
               </div>
+            </div>
+          )}
+
+          {state === "input" && preflightBlocked && preflightCopy && (
+            <div
+              role="alert"
+              data-testid="preflight-banner"
+              data-status={preflight?.status}
+              className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"
+            >
+              <div className="flex items-start gap-2 text-sm text-amber-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{preflightCopy}</span>
+              </div>
+              {preflight?.status === "no_trustline" && (
+                <button
+                  type="button"
+                  onClick={handleAddTrustline}
+                  disabled={addingTrustline}
+                  className="mt-3 rounded-full bg-[#0a0a0a] px-4 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                >
+                  {addingTrustline ? "Adding trustline…" : "Add USDC trustline"}
+                </button>
+              )}
+              {trustlineError && (
+                <p className="mt-2 text-xs text-destructive">{trustlineError}</p>
+              )}
             </div>
           )}
 

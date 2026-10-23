@@ -1,0 +1,75 @@
+services:
+  postgres_production:
+    image: postgres:15-alpine
+    container_name: nester_postgres_production
+    environment:
+      POSTGRES_DB: nester_production
+      POSTGRES_USER: nester
+      # Real credentials are supplied through deploy/production/.env, which is
+      # gitignored, the same pattern deploy/staging/docker-compose.staging.yml
+      # uses for its secret-shaped values. No default here on purpose: a
+      # production database must never silently start on a guessable password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in deploy/production/.env}
+    volumes:
+      - postgres_production_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nester -d nester_production"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # No host port mapping: production Postgres is reachable only on the
+    # compose network, same shape as the staging profile's intent for the
+    # API's metrics listener.
+    restart: unless-stopped
+
+  redis_production:
+    image: redis:7-alpine
+    container_name: nester_redis_production
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  api_production:
+    # Pinned to an immutable digest resolved from the release tag by the
+    # deploy-production workflow, never a mutable tag like `:latest` or
+    # `:staging-<sha>`. ${API_IMAGE_DIGEST} is injected by that workflow at
+    # deploy time (see .github/workflows/deploy-production.yml).
+    image: ghcr.io/suncrestlabs/nester-api@${API_IMAGE_DIGEST:?set by the deploy-production workflow}
+    container_name: nester_api_production
+    environment:
+      - DATABASE_URL=postgres://nester:${POSTGRES_PASSWORD:?set in deploy/production/.env}@postgres_production:5432/nester_production?sslmode=disable
+      - REDIS_URL=redis://redis_production:6379
+      - STELLAR_NETWORK=mainnet
+      - STELLAR_HORIZON_URL=https://horizon.stellar.org
+      - CONTRACT_ADDRESS_VAULT_FACTORY=${CONTRACT_ADDRESS_VAULT_FACTORY:?set in deploy/production/.env}
+      - CONTRACT_ADDRESS_YIELD_REGISTRY=${CONTRACT_ADDRESS_YIELD_REGISTRY:?set in deploy/production/.env}
+      - STELLAR_OPERATOR_SECRET=${STELLAR_OPERATOR_SECRET:?set in deploy/production/.env}
+      - APP_ENV=production
+      # Migrations run as their own approved job (see the migrate job in
+      # deploy-production.yml), never automatically from the long-running
+      # API container in production.
+      - RUN_MIGRATIONS=false
+    depends_on:
+      postgres_production:
+        condition: service_healthy
+      redis_production:
+        condition: service_healthy
+    restart: unless-stopped
+
+  signer_production:
+    # Built and deployed from its own Dockerfile.signer so that compromising
+    # the API container does not yield the mainnet signing key (see
+    # docs/security/signing-isolation.md, and apps/api/Dockerfile.signer's
+    # own comment to the same effect).
+    image: ghcr.io/suncrestlabs/nester-signer@${SIGNER_IMAGE_DIGEST:?set by the deploy-production workflow}
+    container_name: nester_signer_production
+    environment:
+      - STELLAR_OPERATOR_SECRET=${STELLAR_OPERATOR_SECRET:?set in deploy/production/.env}
+      - APP_ENV=production
+    restart: unless-stopped
+
+volumes:
+  postgres_production_data:

@@ -1,82 +1,64 @@
 name: CI
 
+# Path-filtered build and test jobs. Security scanning lives in security.yml and
+# scheduled work in nightly.yml; nothing here runs a tool that those own, so
+# every tool runs exactly once per change.
+#
+# Required status checks (see docs/security/ci-gates.md): "CI gate". It
+# aggregates every job below, so a job skipped by the path filter counts as a
+# pass and a failed or cancelled job blocks the merge.
+
 on:
-  push:
-    branches: ["*"]
   pull_request:
-    branches: ["*"]
+  push:
+    branches: [dev, main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  # Detect which areas of the monorepo changed so downstream jobs can skip
-  # work they don't need to run. Each filter is an OR of globs; if ANY match,
-  # that area's job will execute its steps. Workflow/shared changes force
-  # everything to run.
+  # Decides which areas of the monorepo a change touches so downstream jobs can
+  # skip work they do not need. Filters live in .github/path-filters.yml.
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       website: ${{ steps.filter.outputs.website }}
       dapp: ${{ steps.filter.outputs.dapp }}
       api: ${{ steps.filter.outputs.api }}
       contracts: ${{ steps.filter.outputs.contracts }}
+      observability: ${{ steps.filter.outputs.observability }}
       shared: ${{ steps.filter.outputs.shared }}
-      slo: ${{ steps.filter.outputs.slo }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - uses: dorny/paths-filter@b41dfa943b1939b9b646f67753bfe35cf6e4de03 # v3.0.2
         id: filter
         with:
-          # On push events, compare against the previous commit so the first
-          # push to a branch doesn't mark every filter as "changed". On PRs
-          # this defaults to the merge base.
+          # On push events compare against the previous commit; on PRs this
+          # defaults to the merge base.
           base: ${{ github.event_name == 'push' && github.event.before || '' }}
-          filters: |
-            shared:
-              - '.github/workflows/**'
-              - 'pnpm-lock.yaml'
-              - 'package.json'
-              - 'pnpm-workspace.yaml'
-            website:
-              - 'apps/website/**'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-            dapp:
-              - 'apps/dapp/**'
-            api:
-              - 'apps/api/**'
-            slo:
-              - 'docker/prometheus/**'
-              - 'docker/alertmanager/**'
-              - 'docker/grafana/**'
-              - 'scripts/build_slo_dashboards.py'
-              - 'tests/probes/**'
-            contracts:
-              - 'packages/contracts/**'
-              - 'scripts/contract-audit.sh'
-              - '.github/workflows/contract-audit.yml'
+          filters: .github/path-filters.yml
 
   website:
-    name: Website (Next.js)
+    name: Website
     needs: changes
     if: needs.changes.outputs.website == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
-
-      - uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
+      - uses: ./.github/actions/setup
         with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+          node: "true"
+          node-version: "20"
 
       - name: Build website
         run: pnpm --filter @nester/website build
@@ -84,38 +66,24 @@ jobs:
       - name: Lint website
         run: pnpm --filter @nester/website lint
 
-  dapp-frontend:
-    name: Dapp Frontend (Next.js)
+  dapp:
+    name: Dapp
     needs: changes
     if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
-
-      - uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
+      - uses: ./.github/actions/setup
         with:
-          node-version: 22
-          cache: pnpm
+          node: "true"
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      # Gates on the security ruleset, which is what the step name promises
-      # and what nester#1236 asked for. Pointing it at the full `lint` surface
-      # made it fail on 47 pre-existing style and react-hooks errors in files
-      # no security change had touched — a gate that red-lines every unrelated
-      # PR gets switched back off, which is how it ended up non-blocking in
-      # the first place.
+      # Gates on the security ruleset (nester#1236). The full `lint` surface
+      # reports pre-existing style and react-hooks errors in files no security
+      # change touched; it is not part of this gate because a required check
+      # cannot be non-blocking.
       - name: Lint (security rules)
         run: pnpm --filter @nester/dapp run lint:security
-
-      # The full ruleset still runs and still reports; tightening the 47
-      # pre-existing errors is separate work, so it does not block a merge yet.
-      - name: Lint (full, non-blocking)
-        continue-on-error: true
-        run: pnpm --filter @nester/dapp run lint
 
       - name: Build
         run: pnpm --filter @nester/dapp run build
@@ -166,8 +134,6 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm --filter @nester/dapp exec playwright install chromium --with-deps
 
-      # playwright.config.ts starts `next dev` on :3001 and sets the harness
-      # env vars it needs, so there is no separate server step here.
       - name: Run E2E tests
         run: pnpm --filter @nester/dapp run test:e2e
 
@@ -407,7 +373,7 @@ jobs:
           python3 scripts/typosquat_check.py apps/dapp/frontend/package.json "$BASE_REF"
 
   api:
-    name: API (Go)
+    name: API
     needs: changes
     if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
@@ -444,15 +410,14 @@ jobs:
       # internal/ws) skip via t.Skip when this is unset, following the
       # convention in internal/middleware/ratelimit_backend_test.go. REDIS_URL
       # above is what the app itself reads; without this, every such test
-      # silently skips in CI even though the redis service below is running.
+      # silently skips in CI even though the redis service is running.
       REDIS_ADDR: localhost:6379
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v5.3.0
+      - uses: ./.github/actions/setup
         with:
-          go-version-file: apps/api/go.mod
-          cache: true
+          go: "true"
 
       - name: Check migration collisions
         run: |
@@ -474,35 +439,39 @@ jobs:
 
       # Collision checking above proves the chain is well-named, not that it
       # works. This applies every migration from scratch, seeds the result, then
-      # rolls the whole chain back down — reversibility breaks against data, not
-      # against an empty schema (issue #1123). A migration that cannot make the
-      # round trip fails the build; one that is deliberately irreversible has to
-      # say so with a `migration:irreversible` marker in its .down.sql.
+      # rolls the whole chain back down: reversibility breaks against data, not
+      # against an empty schema (issue #1123). A migration that is deliberately
+      # irreversible says so with a `migration:irreversible` marker in its
+      # .down.sql.
       - name: Check migration safety (up, seed, down)
-        env:
-          DATABASE_URL: postgres://nester:nester@localhost:5432/nester_test?sslmode=disable
         run: go run -tags migrationsafety ./scripts/verify_migrations.go -dir migrations
 
       - name: Build
         run: go build ./...
 
+      - name: go vet
+        run: go vet ./...
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+
+      - name: staticcheck
+        run: staticcheck ./...
+
       # Issue #1058: the committed spec is a build artifact, not a
-      # hand-maintained document — this is the check that gives that
-      # exercise teeth. Currently covers the vault lifecycle routes only
-      # (see internal/openapi/spec.go); full endpoint coverage is follow-up
-      # work.
+      # hand-maintained document; this check gives that teeth.
       - name: Check OpenAPI spec is up to date
         run: go run ./cmd/openapi-gen -check openapi.yaml
+
+      # The env var reference is generated from the config loader, so an
+      # added, renamed or re-defaulted variable must regenerate the doc.
+      - name: Check API config reference is up to date
+        run: go run ./cmd/config-doc -check ../../docs/api-config.md
 
       - name: Test (unit)
         run: go test -race -timeout 120s -count=1 -short ./...
 
-      # Database-backed tests gate on TEST_DATABASE_DSN (the convention in
-      # internal/db and internal/repository/postgres), not DATABASE_URL, so
-      # without this variable every one of them silently skipped — and the
-      # step was continue-on-error, so it never gated a merge either. Scoped
-      # to this step so the unit run above stays DB-free and parallel.
-      #
+      # Database-backed tests gate on TEST_DATABASE_DSN, not DATABASE_URL.
       # -p 1: the tests share one database and each wipes the public schema
       # before applying the full migration chain, so packages must not run
       # concurrently. No -run filter: DB-gated tests whose names lack
@@ -518,33 +487,8 @@ jobs:
           RAPID_SEED: "29062026"
         run: go test -timeout 60s -run PropertyBased -v ./internal/domain/vault
 
-  go-vet-staticcheck:
-    name: Go vet + staticcheck (API)
-    needs: changes
-    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/api
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v5.3.0
-        with:
-          go-version-file: apps/api/go.mod
-          cache: true
-
-      - name: go vet
-        run: go vet ./...
-
-      - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
-
-      - name: staticcheck
-        run: staticcheck ./...
-
   contracts:
-    name: Contracts (Rust)
+    name: Contracts
     needs: changes
     if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
@@ -554,13 +498,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: ./.github/actions/setup
         with:
-          targets: wasm32-unknown-unknown
-          components: rustfmt,clippy
-
-      - name: Add wasm32-unknown-unknown target
-        run: rustup target add wasm32-unknown-unknown
+          rust: "true"
 
       - name: Build yield_registry WASM
         run: cargo build --release --target wasm32-unknown-unknown -p yield-registry-contract
@@ -590,12 +530,10 @@ jobs:
 
       # The vault contract's integration tests link against the pre-compiled
       # vault_token.wasm artifact built above. Run them explicitly and fail the
-      # job if zero tests execute — a green run with no tests would otherwise
+      # job if zero tests execute: a green run with no tests would otherwise
       # give false confidence that the contract logic was verified.
       - name: Run vault-contract tests
         run: |
-          # Capture output but still fail the job if the build/test command
-          # itself errors (e.g. a missing WASM artifact aborts compilation).
           if ! output=$(cargo test -p vault-contract 2>&1); then
             echo "$output"
             echo "ERROR: vault-contract tests failed to build or run"
@@ -603,94 +541,145 @@ jobs:
           fi
           echo "$output"
           # \b0 only matches a standalone zero, so "10 tests" / "40 passed"
-          # never trip this guard — only a genuinely empty run does.
+          # never trip this guard, only a genuinely empty run does.
           if echo "$output" | grep -qE '\b0 tests'; then
             echo "ERROR: No vault-contract tests ran — possible missing WASM artifact"
             exit 1
           fi
 
       # Compile-only: the fuzz crate targets vault-contract's public
-      # conversion module directly (see fuzz/fuzz_targets/conversion_math.rs)
-      # and isn't a member of this workspace (nester#1350), so nothing above
-      # would otherwise catch it silently bitrotting if that module's API
-      # changes. The actual randomized run happens in the nightly workflow,
-      # where minutes-long fuzzing time is acceptable; this just proves it
-      # still builds on every PR.
+      # conversion module directly and is not a member of this workspace
+      # (nester#1350), so nothing above would catch it bitrotting. The
+      # randomized run happens in nightly.yml.
       - name: Check vault-contract fuzz target compiles
         working-directory: packages/contracts/contracts/vault/fuzz
         run: cargo check --bin conversion_math
 
-      # Blocking gate (#1484): format violations fail the job so no PR can
-      # land unformatted Rust.
+      # Blocking gate (#1484): format violations fail the job.
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      # Blocking gate (#1484): clippy warnings are errors; -D warnings ensures
-      # any new lint introduced by a toolchain bump also blocks the PR.
+      # Blocking gate (#1484): clippy warnings are errors, so a lint introduced
+      # by a toolchain bump also blocks the PR.
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
-      # Full integration suite (#1483): run without a filter so every test in
-      # nester-integration-tests executes, not just the property_tests subset
-      # that already ran above.
+      # Full integration suite (#1483): no filter, so every test in
+      # nester-integration-tests executes.
       - name: Run integration tests
         run: cargo test -p nester-integration-tests
 
-  sbom:
-    name: SBOM Generation
+      # Reproducible WASM hashes (moved from contract-audit.yml). The three
+      # crates above are already built; cargo skips them and builds only the
+      # remaining deployable crates, so contracts are not compiled twice.
+      - name: Build deployable contracts and calculate WASM hashes
+        working-directory: .
+        run: |
+          cargo metadata --manifest-path packages/contracts/Cargo.toml --no-deps --format-version 1 \
+            | python3 scripts/list_contract_packages.py \
+            | while read -r pkg_name; do
+                echo "Building $pkg_name..."
+                cargo build --manifest-path packages/contracts/Cargo.toml --release --target wasm32-unknown-unknown -p "$pkg_name"
+              done
+          mkdir -p wasm-hashes
+          {
+            echo "# Reproducible WASM Hashes"
+            echo "Generated on: $(date -u)"
+            echo ""
+            for wasm in packages/contracts/target/wasm32-unknown-unknown/release/*.wasm; do
+              [ -f "$wasm" ] && echo "$(sha256sum "$wasm" | awk '{print $1}')  $(basename "$wasm")"
+            done
+          } > wasm-hashes/wasm-hashes.txt
+          cat wasm-hashes/wasm-hashes.txt
+
+      - name: Upload WASM hashes
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: contract-wasm-hashes
+          path: wasm-hashes/wasm-hashes.txt
+
+  # SLO rules (nester#1056). Validates the recording and alerting rules and
+  # runs the burn-rate unit tests against the same files Prometheus loads, so a
+  # threshold edited without updating its arithmetic fails the build rather than
+  # being discovered during an incident.
+  observability:
+    name: Observability
     needs: changes
+    if: needs.changes.outputs.observability == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v5.3.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          go-version-file: apps/api/go.mod
+          python-version: "3.12"
 
-      - name: Install cyclonedx-gomod (Go, pinned release)
-        run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
-
-      - name: Install syft (pinned release, checksum-verified)
+      - name: Install promtool and amtool
         run: |
-          SYFT_VERSION=1.50.0
-          ASSET="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
-          curl -sSfL -o "/tmp/${ASSET}" \
-            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${ASSET}"
-          curl -sSfL -o "/tmp/syft_${SYFT_VERSION}_checksums.txt" \
-            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_checksums.txt"
-          cd /tmp
-          grep "  ${ASSET}$" "syft_${SYFT_VERSION}_checksums.txt" | sha256sum -c -
-          tar -xzf "${ASSET}"
-          sudo mv /tmp/syft /usr/local/bin/syft
+          set -euo pipefail
+          PROM_VERSION=3.1.0
+          AM_VERSION=0.28.0
+          curl -sSfL "https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz" \
+            | sudo tar xz --strip-components=1 -C /usr/local/bin "prometheus-${PROM_VERSION}.linux-amd64/promtool"
+          curl -sSfL "https://github.com/prometheus/alertmanager/releases/download/v${AM_VERSION}/alertmanager-${AM_VERSION}.linux-amd64.tar.gz" \
+            | sudo tar xz --strip-components=1 -C /usr/local/bin "alertmanager-${AM_VERSION}.linux-amd64/amtool"
+          promtool --version
+          amtool --version
 
-      - name: Generate Go API SBOM
-        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true'
-        working-directory: apps/api
+      - name: Check Prometheus config and rules
+        run: promtool check config docker/prometheus/prometheus.yml
+
+      - name: Check Alertmanager config
+        run: amtool check-config docker/alertmanager/alertmanager.yml
+
+      # Proves the fast-burn alert fires on an induced burst, the slow-burn
+      # alert tickets without paging, a healthy system stays quiet, and the
+      # thresholds behave at the boundary.
+      - name: Run burn-rate alert tests
+        working-directory: docker/prometheus/rules
+        run: promtool test rules slo_alerts_test.yml slo_probe_alerts_test.yml slo_money_path_alerts_test.yml stellar_reserve_test.yml
+
+      # The probes create real staging transactions, so their safety guards (no
+      # default target, production-name and production-URL refusal, mutations
+      # opt-in) are the part that must never regress.
+      - name: Run synthetic probe tests
+        working-directory: tests/probes
         run: |
-          cyclonedx-gomod mod -json -output ../../sbom-api.json .
-          syft dir:. --output cyclonedx-json=../../sbom-api-syft.json
+          python3 -m pip install --quiet pytest
+          python3 -m pytest -q
 
-      - name: Generate frontend SBOM (npm/pnpm)
-        if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
-        working-directory: apps/dapp/frontend
+      # The dashboards are generated from scripts/build_slo_dashboards.py so the
+      # panels and thresholds stay consistent across four files. Committing the
+      # output means Grafana loads exactly what is reviewed; this step stops the
+      # two drifting apart.
+      - name: Check SLO dashboards are up to date
         run: |
-          # syft catalogs the pnpm lockfile directly. @cyclonedx/cyclonedx-npm
-          # dropped --pnpm support in v6, so the already-checksum-verified syft
-          # binary (installed above) is used for the frontend SBOM.
-          syft dir:. --output cyclonedx-json=../../../sbom-frontend.json
+          set -euo pipefail
+          python3 scripts/build_slo_dashboards.py
+          if ! git diff --quiet -- docker/grafana/dashboards; then
+            echo "::error::Generated dashboards differ from the committed ones."
+            echo "Run: python scripts/build_slo_dashboards.py, then commit the result."
+            git diff --stat -- docker/grafana/dashboards
+            exit 1
+          fi
 
-      - name: Generate contracts SBOM (Rust)
-        if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
-        working-directory: packages/contracts
+  # The single required status check for this workflow. A path-skipped job
+  # reports "skipped", which this treats as a pass; failure or cancellation of
+  # any job blocks the merge.
+  ci-gate:
+    name: CI gate
+    needs: [changes, website, dapp, api, contracts, observability]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI job to have passed or been skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          syft dir:. --output cyclonedx-json=../../sbom-contracts.json
-
-      - name: Upload SBOM artifacts
-        # Only run when at least one SBOM-covered component changed; a docs- or
-        # website-only change generates no SBOMs and must not fail the job.
-        if: needs.changes.outputs.api == 'true' || needs.changes.outputs.dapp == 'true' || needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sbom-artifacts
-          path: sbom-*.json
-          if-no-files-found: error
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "::error::A CI job finished with result '$result'."
+              exit 1
+            fi
+          done

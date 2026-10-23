@@ -3673,3 +3673,175 @@ mod locks_test {
         assert_eq!(view.total_locked_shares, 500 * XLM);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Pause-mode matrix: which user operations survive each way a vault can stop
+// ---------------------------------------------------------------------------
+//
+// The launch plan is "pause deposits, keep withdrawals open". That only holds
+// if no withdraw path shares a guard with deposits. This module pins, for each
+// pause mode, exactly which of `deposit`, `withdraw`, `emergency_withdraw`,
+// `harvest` and `unlock_position` succeed.
+//
+// The table below is the source of truth for MATRIX and is mirrored in
+// docs/protocol-health.md ("Pause modes: what still works"). Change all three
+// together. ✓ = succeeds, ✗ = rejected.
+//
+// | Mode (how it is entered)                           | deposit | withdraw | emergency_withdraw | harvest | unlock_position |
+// | -------------------------------------------------- | ------- | -------- | ------------------ | ------- | --------------- |
+// | Normal (control)                                   | ✓       | ✓        | ✗                  | ✓       | ✓               |
+// | Deposit-only breaker (`guardian_halt_deposits`)    | ✗       | ✓        | ✗                  | ✓       | ✓               |
+// | Per-vault pause (`pause`)                          | ✗       | ✗        | ✓                  | ✗       | ✓               |
+// | Full-halt breaker (`guardian_trip_breaker`)        | ✗       | ✗        | ✓                  | ✗       | ✓               |
+//
+// `emergency_withdraw` is a paused-only exit by design, so it is rejected in
+// the two modes where the normal `withdraw` path is still open.
+mod pause_matrix {
+    extern crate std;
+
+    use super::*;
+    use proptest::prelude::*;
+
+    const THIRTY_DAYS: u64 = 30 * DAY;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Mode {
+        Normal,
+        DepositsHalted,
+        VaultPaused,
+        FullHalt,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Op {
+        Deposit,
+        Withdraw,
+        EmergencyWithdraw,
+        Harvest,
+        Unlock,
+    }
+
+    const OPS: [Op; 5] = [
+        Op::Deposit,
+        Op::Withdraw,
+        Op::EmergencyWithdraw,
+        Op::Harvest,
+        Op::Unlock,
+    ];
+
+    /// Expected outcome per mode, in `OPS` order.
+    const MATRIX: [(Mode, [bool; 5]); 4] = [
+        (Mode::Normal, [true, true, false, true, true]),
+        (Mode::DepositsHalted, [false, true, false, true, true]),
+        (Mode::VaultPaused, [false, false, true, false, true]),
+        (Mode::FullHalt, [false, false, true, false, true]),
+    ];
+
+    /// Builds a fresh vault where one user holds a flexible position, a matured
+    /// lock and harvestable yield, puts it into `mode`, and reports whether
+    /// `op` succeeds. Each (mode, op) pair gets its own environment so one
+    /// operation cannot change the state the next one sees.
+    fn attempt(mode: Mode, op: Op) -> bool {
+        let (env, admin, token, vault, _treasury) = setup();
+        let user = Address::generate(&env);
+        mint(&token, &user, 1_200 * XLM);
+
+        vault.deposit(&user, &(1_000 * XLM), &0);
+        let lock_id = vault.deposit_locked(&user, &(100 * XLM), &0, &THIRTY_DAYS);
+
+        // Harvestable yield, funded in the vault so the fee transfer can settle.
+        vault.grant_role(&admin, &admin, &Role::Manager);
+        mint(&token, &vault.address, 500 * XLM);
+        vault.report_yield(&admin, &(100 * XLM));
+        advance_time(&env, THIRTY_DAYS + 1);
+        fully_vest(&env, &vault, &admin);
+
+        match mode {
+            Mode::Normal => {}
+            Mode::DepositsHalted => vault.guardian_halt_deposits(&admin),
+            Mode::VaultPaused => vault.pause(&admin),
+            Mode::FullHalt => vault.guardian_trip_breaker(&admin),
+        }
+
+        match op {
+            Op::Deposit => matches!(vault.try_deposit(&user, &(10 * XLM), &0), Ok(Ok(_))),
+            Op::Withdraw => matches!(vault.try_withdraw(&user, &(10 * XLM), &0), Ok(Ok(_))),
+            Op::EmergencyWithdraw => matches!(vault.try_emergency_withdraw(&user), Ok(Ok(_))),
+            Op::Harvest => matches!(vault.try_harvest(&user), Ok(Ok(_))),
+            Op::Unlock => matches!(vault.try_unlock_position(&user, &lock_id), Ok(Ok(_))),
+        }
+    }
+
+    #[test]
+    fn pause_mode_matrix_matches_the_documented_table() {
+        let mut mismatches = std::vec::Vec::new();
+        for (mode, expected) in MATRIX {
+            for (op, want) in OPS.into_iter().zip(expected) {
+                let got = attempt(mode, op);
+                if got != want {
+                    mismatches.push(std::format!(
+                        "{mode:?} / {op:?}: expected {}, got {}",
+                        if want { "success" } else { "rejection" },
+                        if got { "success" } else { "rejection" },
+                    ));
+                }
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "pause matrix drifted from docs/protocol-health.md:\n{}",
+            mismatches.join("\n")
+        );
+    }
+
+    #[test]
+    fn deposit_only_halt_does_not_pause_the_vault() {
+        // A withdraw path guarded by `require_active` would be locked by a
+        // pause but not by this halt; the halt must not flip the status that
+        // `require_active` reads, or the two guards would be indistinguishable.
+        let (env, admin, token, vault, _treasury) = setup();
+        let user = Address::generate(&env);
+        mint(&token, &user, 100 * XLM);
+        vault.deposit(&user, &(100 * XLM), &0);
+
+        vault.guardian_halt_deposits(&admin);
+
+        assert_eq!(vault.get_breaker_status().severity, Severity::DepositsHalted);
+        assert!(!vault.is_paused());
+        assert_eq!(vault.get_status(), VaultStatus::Active);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        /// Withdrawals always work while only deposits are halted, for any
+        /// position size and any fraction withdrawn, and deposits stay refused
+        /// throughout.
+        #[test]
+        fn prop_withdrawals_stay_open_while_only_deposits_are_halted(
+            deposit_amount in 10 * XLM..1_000_000 * XLM,
+            withdraw_bps in 1_i128..=10_000,
+        ) {
+            let (env, admin, token, vault, _treasury) = setup();
+            let user = Address::generate(&env);
+            mint(&token, &user, deposit_amount + 10 * XLM);
+
+            let shares = vault.deposit(&user, &deposit_amount, &0);
+            vault.guardian_halt_deposits(&admin);
+
+            prop_assert!(
+                vault.try_deposit(&user, &(10 * XLM), &0).is_err(),
+                "deposits must be refused while halted"
+            );
+
+            let to_withdraw = (shares * withdraw_bps / 10_000).max(1);
+            prop_assert!(
+                matches!(vault.try_withdraw(&user, &to_withdraw, &0), Ok(Ok(_))),
+                "withdrawing {} of {} shares must succeed while only deposits are halted",
+                to_withdraw,
+                shares
+            );
+            prop_assert_eq!(vault.get_shares(&user), shares - to_withdraw);
+        }
+    }
+}
