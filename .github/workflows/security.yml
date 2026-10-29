@@ -58,6 +58,7 @@ jobs:
           API: ${{ steps.filter.outputs.api }}
           CONTRACTS: ${{ steps.filter.outputs.contracts }}
           PYTHON: ${{ steps.filter.outputs.python }}
+          CI_SCRIPTS: ${{ steps.filter.outputs.ci_scripts }}
         run: |
           on() { [ "$ALL" = "true" ] || [ "$SHARED" = "true" ] || [ "$1" = "true" ]; }
 
@@ -66,6 +67,7 @@ jobs:
           api=false;  if on "$API"; then api=true; fi
           rust=false; if on "$CONTRACTS"; then rust=true; fi
           py=false;   if on "$PYTHON"; then py=true; fi
+          scripts=false; if on "$CI_SCRIPTS"; then scripts=true; fi
           sbom=false; if [ "$api" = true ] || [ "$dapp" = true ] || [ "$rust" = true ]; then sbom=true; fi
 
           {
@@ -74,9 +76,18 @@ jobs:
             echo "api=$api"
             echo "rust=$rust"
             echo "py=$py"
+            echo "scripts=$scripts"
             echo "sbom=$sbom"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
+
+      # The waiver validator and typosquat check decide what this job lets
+      # through, so their own regression tests run before either is trusted.
+      - name: Test security scripts
+        if: steps.scope.outputs.scripts == 'true'
+        run: |
+          python3 scripts/test_validate_vulnignore.py
+          python3 scripts/test_typosquat_check.py
 
       # ── Secrets ──────────────────────────────────────────────────────────
 

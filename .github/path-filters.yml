@@ -20,6 +20,13 @@ api:
 contracts:
   - 'packages/contracts/**'
   - 'scripts/contract-audit.sh'
+deploy:
+  - 'deploy/**'
+ci_scripts:
+  - 'scripts/validate_vulnignore.py'
+  - 'scripts/test_validate_vulnignore.py'
+  - 'scripts/typosquat_check.py'
+  - 'scripts/test_typosquat_check.py'
 observability:
   - 'docker/prometheus/**'
   - 'docker/alertmanager/**'
