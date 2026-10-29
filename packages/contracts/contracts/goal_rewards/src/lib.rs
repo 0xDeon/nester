@@ -66,7 +66,8 @@ use nester_common::goal_effort::{
     self, check_eligibility, compute_bonus, effort_score_bps, ContributionStatsInput,
     IneligibilityReason, RewardTier,
 };
-use savings_goal::{GoalStatus, SavingsGoalContractClient};
+mod registry;
+use registry::{ContributionStats, GoalStatus, SavingsGoalContractClient};
 
 // ---------------------------------------------------------------------------
 // Errors — a SEPARATE enum from nester_common::ContractError, which is
@@ -755,7 +756,7 @@ impl From<Vec<RewardTierStored>> for TierBuf {
     }
 }
 
-fn to_pure_stats(stats: &savings_goal::ContributionStats) -> ContributionStatsInput {
+fn to_pure_stats(stats: &ContributionStats) -> ContributionStatsInput {
     ContributionStatsInput {
         contribution_count: stats.contribution_count,
         distinct_periods: stats.distinct_periods,
