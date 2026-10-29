@@ -637,11 +637,9 @@ export async function executeVaultDeposit(params: {
     throw new Error("Vault is not yet live. Deposits are currently disabled.");
   }
 
-  const { xdr } = await buildDepositTransaction({ walletAddress, contractId, amount, minSharesOut });
-  const signedXdr = await signTransaction(xdr);
   await assertWalletOnDappNetwork();
   const signedXdr = await signWithExpiryRebuild(
-    () => buildDepositTransaction({ walletAddress, contractId, amount }),
+    () => buildDepositTransaction({ walletAddress, contractId, amount, minSharesOut }),
     signTransaction
   );
   return submitTransaction(signedXdr);
