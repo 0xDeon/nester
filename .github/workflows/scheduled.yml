@@ -1,37 +1,52 @@
-name: Nightly
+name: Scheduled
 
-# Everything that is too slow or too environment-dependent to gate a pull
-# request. Failures of a scheduled run open or update one tracking issue instead
-# of one notification per job.
+# Everything that runs on a clock rather than on a change. Each cron selects its
+# own jobs; the rest skip. Failures of the nightly and soak jobs open or update
+# one tracking issue instead of one notification per job.
 #
+#   every 15 min      synthetic probes against staging (nester#1056)
 #   daily  03:00 UTC  contracts property tests and fuzzing, API property tests,
 #                     testnet deposit/withdraw journey
-#   weekly 02:00 Sun  staging load soak (a second cron; the daily jobs are
-#                     skipped on that trigger so they do not run twice)
+#   weekly 02:00 Sun  staging load soak
 #
-# The testnet journey needs a funded account and the soak needs a staging
-# target; both skip themselves with a notice when that is not configured:
+# The testnet journey needs a funded account, and the soak and probes need a
+# staging target; each skips itself with a notice when that is not configured:
 #   TESTNET_WALLET_ADDRESS (secret), VAULT_ID (variable), STAGING_URL (variable)
-#   STAGING_LOAD_* (secrets), see docs/ci/secrets.md.
+#   STAGING_LOAD_* and STAGING_PROBE_* (secrets), see docs/ci/secrets.md.
 
 on:
   schedule:
+    - cron: "*/15 * * * *"
     - cron: "0 3 * * *"
     - cron: "0 2 * * 0"
   workflow_dispatch:
     inputs:
+      task:
+        description: "Which scheduled task to run"
+        required: true
+        default: nightly
+        type: choice
+        options:
+          - nightly
+          - soak
+          - probes
       staging_url:
-        description: "Base URL for the testnet journey (overrides the STAGING_URL variable)"
+        description: "nightly: base URL for the testnet journey (overrides the STAGING_URL variable)"
         required: false
         type: string
-      run_soak:
-        description: "Also run the staging load soak"
-        required: false
-        default: false
+      allow_mutations:
+        description: >-
+          probes: run the deposit and withdrawal probes, which create real
+          staging transactions. Leave false for a read-only run.
         type: boolean
+        default: false
 
+# One run per task at a time. Keyed on the cron (or the dispatched task) so a
+# 45-minute nightly never holds up the 15-minute probes. Never cancelled: two
+# concurrent deposit probes against the same vault would interleave and produce
+# failures that describe the probes rather than the service.
 concurrency:
-  group: nightly
+  group: scheduled-${{ github.event.schedule || inputs.task }}
   cancel-in-progress: false
 
 permissions:
@@ -40,7 +55,7 @@ permissions:
 jobs:
   contracts-property:
     name: Contracts property tests
-    if: github.event.schedule != '0 2 * * 0'
+    if: github.event.schedule == '0 3 * * *' || inputs.task == 'nightly'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -62,7 +77,7 @@ jobs:
 
   contracts-fuzz:
     name: Fuzz vault conversion arithmetic
-    if: github.event.schedule != '0 2 * * 0'
+    if: github.event.schedule == '0 3 * * *' || inputs.task == 'nightly'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -98,7 +113,7 @@ jobs:
 
   api-property:
     name: API property tests
-    if: github.event.schedule != '0 2 * * 0'
+    if: github.event.schedule == '0 3 * * *' || inputs.task == 'nightly'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -120,7 +135,7 @@ jobs:
 
   e2e-testnet:
     name: Testnet deposit / withdraw journey
-    if: github.event.schedule != '0 2 * * 0'
+    if: github.event.schedule == '0 3 * * *' || inputs.task == 'nightly'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -186,7 +201,7 @@ jobs:
 
   soak:
     name: k6 soak (staging)
-    if: github.event.schedule == '0 2 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.run_soak)
+    if: github.event.schedule == '0 2 * * 0' || inputs.task == 'soak'
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -231,6 +246,128 @@ jobs:
           name: k6-soak-summary-${{ github.run_id }}
           path: results/soak-summary.json
           if-no-files-found: warn
+
+  # Synthetic probes (nester#1056). Real-traffic SLIs cannot see a flow that is
+  # broken while nobody is using it, so these exercise deposit, withdrawal and
+  # balance read on a schedule. Every 15 minutes rather than every 5: the
+  # mutating probes create real testnet transactions, and the
+  # SyntheticProbeStale alert allows 30 minutes, tolerating one missed run.
+  # Not wired into the report job: probe failures alert through the pushed
+  # metrics, and a tracking-issue comment every 15 minutes would be noise.
+  probe:
+    name: Probe staging
+    if: github.event.schedule == '*/15 * * * *' || inputs.task == 'probes'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      # A missing secret must never let a probe fall back to localhost or to
+      # production. probe.py refuses to guess a target on its own; this guard
+      # keeps the run from being reported as a failure when it is simply not
+      # configured yet. Same pattern as the soak job above.
+      - name: Check staging target is configured
+        id: guard
+        env:
+          API_BASE_URL: ${{ secrets.STAGING_PROBE_API_BASE_URL }}
+          AUTH_TOKEN: ${{ secrets.STAGING_PROBE_AUTH_TOKEN }}
+          VAULT_ID: ${{ secrets.STAGING_PROBE_VAULT_ID }}
+        run: |
+          all_set=true
+          for var in API_BASE_URL AUTH_TOKEN VAULT_ID; do
+            if [ -z "$(eval echo \$$var)" ]; then
+              echo "::notice::STAGING_PROBE_${var} is not set — skipping the probe run."
+              all_set=false
+            fi
+          done
+          if [ "$all_set" = "true" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            # Surfaced in the job summary, not only as an annotation. The
+            # guard requires all three secrets, so a partially-configured
+            # environment disables every probe while the workflow still
+            # reports green — the state most likely to be mistaken for
+            # "probes are running and finding nothing".
+            {
+              echo "### Synthetic probes skipped"
+              echo
+              echo "Not all STAGING_PROBE_* secrets are configured, so no probe ran."
+              echo "Monitoring is **not** active for this run. See docs/ci/secrets.md."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Run synthetic probes
+        id: probes
+        if: steps.guard.outputs.configured == 'true'
+        continue-on-error: true
+        # continue-on-error allows the Pushgateway push (below) to happen even
+        # if probes fail, so metrics are always published for alerting. The
+        # actual build gate is the "Report probe failure" step that follows,
+        # which exits 1 if this step failed. This ensures failures are visible
+        # in both the Actions UI and through alerting metrics.
+        env:
+          PROBE_API_BASE_URL: ${{ secrets.STAGING_PROBE_API_BASE_URL }}
+          PROBE_AUTH_TOKEN: ${{ secrets.STAGING_PROBE_AUTH_TOKEN }}
+          PROBE_VAULT_ID: ${{ secrets.STAGING_PROBE_VAULT_ID }}
+          PROBE_ENVIRONMENT: staging
+          PROBE_AMOUNT: ${{ vars.STAGING_PROBE_AMOUNT || '0.01' }}
+          # Mutating probes are opt-in. The scheduled run is read-only unless
+          # STAGING_PROBE_ALLOW_MUTATIONS is set for this environment, so
+          # enabling money movement is a deliberate configuration act rather
+          # than a side effect of merging this workflow.
+          PROBE_ALLOW_MUTATIONS: >-
+            ${{ inputs.allow_mutations && 'true'
+                || vars.STAGING_PROBE_ALLOW_MUTATIONS || 'false' }}
+        run: |
+          mkdir -p results
+          python tests/probes/probe.py --output results/probes.prom
+
+      # Pushed separately from the probe run, and only when a gateway is
+      # configured. The probe's own exit code is not the signal here: a failed
+      # probe still has results worth publishing, which is why the run step
+      # uses continue-on-error and the alerting is driven by the metrics.
+      - name: Push probe results
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          PUSHGATEWAY_URL: ${{ secrets.STAGING_PUSHGATEWAY_URL }}
+          PUSHGATEWAY_AUTH: ${{ secrets.STAGING_PUSHGATEWAY_AUTH }}
+        run: |
+          set -euo pipefail
+          # Checked here rather than in the step's `if`: a step's own `env`
+          # block is not available to its condition, so the expression would
+          # silently evaluate to empty and skip the push every time.
+          if [ -z "${PUSHGATEWAY_URL:-}" ]; then
+            echo "::notice::STAGING_PUSHGATEWAY_URL is not set — probe results not pushed."
+            exit 0
+          fi
+          auth_args=()
+          if [ -n "${PUSHGATEWAY_AUTH:-}" ]; then
+            auth_args=(--header "Authorization: Bearer ${PUSHGATEWAY_AUTH}")
+          fi
+          curl -sSf --max-time 30 "${auth_args[@]}" \
+            --data-binary @results/probes.prom \
+            "${PUSHGATEWAY_URL%/}/metrics/job/nester_synthetic_probes/environment/staging"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && steps.guard.outputs.configured == 'true'
+        with:
+          name: probe-results-${{ github.run_id }}
+          path: results/probes.prom
+          if-no-files-found: warn
+
+      # The workflow fails after publishing, so a failed probe is visible in
+      # the Actions UI as well as through alerting. Publishing first means a
+      # failure never costs us the metrics that explain it.
+      - name: Report probe failure
+        if: steps.guard.outputs.configured == 'true' && steps.probes.outcome == 'failure'
+        run: |
+          echo "::error::One or more synthetic probes failed. See the run log and results/probes.prom."
+          exit 1
 
   # Opens one tracking issue the first time a scheduled run fails and appends a
   # comment on every later failure, rather than one issue per failing night.

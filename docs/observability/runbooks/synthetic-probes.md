@@ -3,7 +3,7 @@
 **Alerts:** `SyntheticProbeFailing`, `SyntheticProbeStale`, `SyntheticProbeMetricsAbsent`, `SyntheticProbeSlow` (all ticket)
 **Dashboard:** [SLO — Synthetic probes](/d/nester-slo-probes/synthetic-probes)
 **Runs:** every 15 minutes against staging via
-[`synthetic-probes.yml`](../../../.github/workflows/synthetic-probes.yml)
+[`scheduled.yml`](../../../.github/workflows/scheduled.yml)
 
 ---
 
@@ -61,7 +61,7 @@ class of problem:
 **3. Open the workflow run.**
 
 ```bash
-gh run list --repo Suncrest-Labs/nester --workflow synthetic-probes.yml --limit 10
+gh run list --repo Suncrest-Labs/nester --workflow scheduled.yml --limit 10
 gh run view <run-id> --log
 ```
 
@@ -166,8 +166,8 @@ Sub-causes:
 
 ```bash
 gh workflow list --repo Suncrest-Labs/nester
-gh workflow enable synthetic-probes.yml --repo Suncrest-Labs/nester
-gh workflow run synthetic-probes.yml --repo Suncrest-Labs/nester
+gh workflow enable scheduled.yml --repo Suncrest-Labs/nester
+gh workflow run scheduled.yml --repo Suncrest-Labs/nester -f task=probes
 ```
 
 If secrets are unset, that is the expected state on a fresh deployment — see

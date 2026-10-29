@@ -1,5 +1,9 @@
-name: Contracts freeze
+name: PR policy
 
+# Checks on pull request metadata (labels, description, file list) rather than
+# on code. Kept apart from ci.yml because it reruns on every label or
+# description edit; inside ci.yml each edit would rerun the full build.
+#
 # Stage 1 scope freeze (docs/LAUNCH_GO_NO_GO.md, "Stage 1 scope freeze").
 #
 # Once the audit-candidate-1 tag exists, a pull request that touches

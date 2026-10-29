@@ -29,7 +29,7 @@ The smoke tests are automatically triggered after each staging deployment via Gi
 Deploy to Staging → Smoke Tests → Pass/Fail Gate → Promotion
 ```
 
-See `.github/workflows/deploy-staging.yml` for workflow configuration.
+See `.github/workflows/deploy.yml` for workflow configuration.
 
 ## Test Structure
 
@@ -248,7 +248,7 @@ SMOKE: FAIL at balance-update (4/6 steps, 285s)
 
 ### Workflow Job Configuration
 
-The `.github/workflows/deploy-staging.yml` workflow includes:
+The `.github/workflows/deploy.yml` workflow includes:
 
 ```yaml
 smoke-test:
@@ -420,7 +420,7 @@ Monitor actual smoke test durations from CI runs:
 
 ## Related Documentation
 
-- **CI Workflow**: `.github/workflows/deploy-staging.yml`
+- **CI Workflow**: `.github/workflows/deploy.yml`
 - **Test Runbook**: `docs/smoke-test-runbook.md`
 - **Playwright Config**: `apps/dapp/frontend/playwright.config.ts`
 - **Stellar SDK**: [@stellar/stellar-sdk](https://docs.stellar.org/learn/building-blocks/introduction)

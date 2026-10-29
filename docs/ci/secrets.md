@@ -7,13 +7,13 @@ This document lists every secret required or consumed by GitHub Actions workflow
 | Secret                     | Workflow                  | Required | Purpose                                             | Failure Mode                                             |
 | -------------------------- | ------------------------- | -------- | --------------------------------------------------- | -------------------------------------------------------- |
 | `SEMGREP_APP_TOKEN`        | `security.yml`            | No       | Enable Semgrep cloud findings                       | Silent degradation — SAST runs but without cloud context |
-| `STAGING_DEPLOY_TOKEN`     | `deploy-staging.yml`      | Yes      | Authenticate with staging deploy service            | Workflow fails                                           |
+| `STAGING_DEPLOY_TOKEN`     | `deploy.yml`              | Yes      | Authenticate with staging deploy service            | Workflow fails                                           |
 | `X402_PAYMENT_PROOF`       | `security.yml`            | No       | Pay for on-demand contract audits                   | Skipped — audit service not used                         |
-| `TESTNET_WALLET_ADDRESS`   | `nightly.yml`              | Yes      | Funded Stellar testnet account for E2E tests        | Workflow fails                                           |
-| `SMOKE_TEST_WALLET_SECRET` | `deploy-staging.yml`      | Yes      | Stellar testnet account for post-deploy smoke tests | Workflow fails                                           |
-| `SLACK_DEPLOYMENT_WEBHOOK` | `deploy-staging.yml`      | No       | Send deployment notifications to Slack              | Notifications silently skipped                           |
-| `STAGING_PROBE_*`          | `synthetic-probes.yml`    | No\*     | Staging environment endpoints & credentials         | Guard prevents execution; workflow skipped               |
-| `STAGING_LOAD_*`           | `nightly.yml`              | No\*     | Staging environment for load/soak tests             | Guard prevents execution; workflow skipped               |
+| `TESTNET_WALLET_ADDRESS`   | `scheduled.yml`           | Yes      | Funded Stellar testnet account for E2E tests        | Workflow fails                                           |
+| `SMOKE_TEST_WALLET_SECRET` | `deploy.yml`              | Yes      | Stellar testnet account for post-deploy smoke tests | Workflow fails                                           |
+| `SLACK_DEPLOYMENT_WEBHOOK` | `deploy.yml`              | No       | Send deployment notifications to Slack              | Notifications silently skipped                           |
+| `STAGING_PROBE_*`          | `scheduled.yml`           | No\*     | Staging environment endpoints & credentials         | Guard prevents execution; workflow skipped               |
+| `STAGING_LOAD_*`           | `scheduled.yml`           | No\*     | Staging environment for load/soak tests             | Guard prevents execution; workflow skipped               |
 | `GITHUB_TOKEN`             | Multiple                  | N/A      | Built-in token for GitHub API access                | Provided automatically by GitHub                         |
 
 \*Optional but required as a set if you want to run probes/load tests.
@@ -48,7 +48,7 @@ This document lists every secret required or consumed by GitHub Actions workflow
 
 ### STAGING_DEPLOY_TOKEN
 
-**Workflow:** `.github/workflows/deploy-staging.yml` → `Deploy to staging` step
+**Workflow:** `.github/workflows/deploy.yml` → `Deploy to staging` step
 
 **Purpose:** Authenticate with the staging deployment service to push built artifacts and trigger the deploy.
 
@@ -111,7 +111,7 @@ Workflow continues; no audit is performed.
 
 ### TESTNET_WALLET_ADDRESS
 
-**Workflow:** `.github/workflows/nightly.yml` → `e2e-testnet` → `Run deposit/withdraw journey`
+**Workflow:** `.github/workflows/scheduled.yml` → `e2e-testnet` → `Run deposit/withdraw journey`
 
 **Purpose:** Funded Stellar testnet account address used for end-to-end deposit/withdraw tests against testnet.
 
@@ -137,7 +137,7 @@ Workflow status: FAILED
 
 ### SMOKE_TEST_WALLET_SECRET
 
-**Workflow:** `.github/workflows/deploy-staging.yml` → `Run smoke tests` step
+**Workflow:** `.github/workflows/deploy.yml` → `Run smoke tests` step
 
 **Purpose:** Stellar testnet account private key for smoke tests that verify the deployed staging dapp works end-to-end.
 
@@ -162,7 +162,7 @@ Workflow status: FAILED
 
 ### SLACK_DEPLOYMENT_WEBHOOK
 
-**Workflow:** `.github/workflows/deploy-staging.yml` → `Notify Slack` step
+**Workflow:** `.github/workflows/deploy.yml` → `Notify Slack` step
 
 **Purpose:** Incoming webhook URL to post deployment notifications to Slack.
 
@@ -190,7 +190,7 @@ Workflow continues; deployment still succeeds but notification is not sent.
 
 ### STAGING_PROBE_API_BASE_URL
 
-**Workflow:** `.github/workflows/synthetic-probes.yml` → Check guard step
+**Workflow:** `.github/workflows/scheduled.yml` → Check guard step
 
 **Purpose:** Base URL of the staging API for synthetic health probes (e.g., `https://api-staging.nester.dev`).
 
@@ -215,7 +215,7 @@ All must be set as a group for probes to run. If any is missing, the guard detec
 
 ### STAGING_LOAD_API_BASE_URL
 
-**Workflow:** `.github/workflows/nightly.yml` → `soak` → Check guard step
+**Workflow:** `.github/workflows/scheduled.yml` → `soak` → Check guard step
 
 **Purpose:** Base URL of the staging API for load and soak testing.
 
@@ -290,17 +290,17 @@ Each secret's failure mode has been implemented and verified:
 
 These workflows have explicit guards that fail with clear error messages:
 
-- **STAGING_DEPLOY_TOKEN** (deploy-staging.yml)
+- **STAGING_DEPLOY_TOKEN** (deploy.yml)
   - Check: Added "Check required secrets" step before deploy
   - Failure: `::error::STAGING_DEPLOY_TOKEN is not configured...`
   - Result: Workflow exits with code 1
 
-- **SMOKE_TEST_WALLET_SECRET** (deploy-staging.yml)
+- **SMOKE_TEST_WALLET_SECRET** (deploy.yml)
   - Check: Guard in "Run smoke tests" step
   - Failure: `::error::SMOKE_TEST_WALLET_SECRET is not configured...`
   - Result: Workflow exits with code 1
 
-- **TESTNET_WALLET_ADDRESS** (nightly.yml)
+- **TESTNET_WALLET_ADDRESS** (scheduled.yml)
   - Check: Guard in "Run deposit/withdraw journey" step
   - Failure: `::error::TESTNET_WALLET_ADDRESS is not configured...`
   - Result: Workflow exits with code 1
@@ -321,19 +321,19 @@ These workflows handle missing secrets without blocking:
   - Result: Workflow continues; no audit performed
   - Already graceful ✓
 
-- **SLACK_DEPLOYMENT_WEBHOOK** (deploy-staging.yml)
+- **SLACK_DEPLOYMENT_WEBHOOK** (deploy.yml)
   - Check: Used only in notification step
   - Behavior: Notifications silently skipped if empty
   - Result: Workflow continues; deployment succeeds
   - Already graceful ✓
 
-- **STAGING*PROBE*\* secrets** (synthetic-probes.yml)
+- **STAGING*PROBE*\* secrets** (scheduled.yml)
   - Check: Guard step checks API_BASE_URL
   - Behavior: `::notice::STAGING_PROBE_API_BASE_URL is not set — skipping the probe run`
   - Result: Entire job skips; no failure
   - Already graceful ✓
 
-- **STAGING*LOAD*\* secrets** (nightly.yml)
+- **STAGING*LOAD*\* secrets** (scheduled.yml)
   - Check: Guard step checks API_BASE_URL
   - Behavior: `::notice::STAGING_LOAD_API_BASE_URL is not set — skipping the soak run`
   - Result: Entire job skips; no failure

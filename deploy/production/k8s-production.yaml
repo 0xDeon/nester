@@ -67,7 +67,7 @@ spec:
                   name: nester-production-contracts
                   key: yield-registry-address
             # Migrations run as their own approved job (see the migrate job
-            # in .github/workflows/deploy-production.yml), gated behind the
+            # in .github/workflows/deploy.yml), gated behind the
             # same `production` environment as the deploy itself -- never
             # automatically from the long-running API container here.
             - name: RUN_MIGRATIONS
@@ -150,7 +150,7 @@ spec:
 # HTTP (see apps/api/cmd/api/main.go). `command`/`args` below override the
 # container's entrypoint to invoke the binary the same way, so this Job pod
 # will keep running as a server after migrating rather than exiting 0 on its
-# own. The workflow's "Run migrations" step (deploy-production.yml) treats
+# own. The workflow's "Run migrations" step (deploy.yml) treats
 # "migrations complete" log line + a successful /readyz response as the
 # completion signal and then deletes the Job, rather than waiting on the
 # Job's own pod phase. Adding a real `--migrate-only` flag to cmd/api is

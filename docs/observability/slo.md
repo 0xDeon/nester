@@ -569,7 +569,7 @@ Monday.
 
 [`tests/probes/probe.py`](../../tests/probes/probe.py) exercises three flows
 against staging every 15 minutes via
-[`.github/workflows/synthetic-probes.yml`](../../.github/workflows/synthetic-probes.yml):
+[`.github/workflows/scheduled.yml`](../../.github/workflows/scheduled.yml):
 
 | Probe | Mutating? | Checks |
 |---|---|---|

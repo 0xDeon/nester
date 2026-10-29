@@ -47,7 +47,7 @@ of the audit, so scope is frozen for Stage 1.
   contracts crate, dependency bumps) waits until after launch. If it cannot,
   it is a scope change: it needs a go/no-go owner's written approval in the PR
   and the auditors told which files moved.
-- **Enforcement.** `.github/workflows/contracts-freeze.yml` runs on every pull
+- **Enforcement.** `.github/workflows/pr-policy.yml` runs on every pull
   request. It does nothing until the `audit-candidate-1` tag exists, then fails
   any PR that touches `packages/contracts/` without the `launch-fix` label and
   a `Finding:` line. Add the "Contracts freeze" job to the required status

@@ -109,35 +109,10 @@ jobs:
       - name: Run gitleaks
         run: gitleaks detect --source . --redact --no-banner --config .gitleaks.toml
 
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4.1.0
-
-      # No `cache: pnpm` here on purpose. This job never runs `pnpm install`
-      # (audit resolves straight from the lockfile), so the pnpm store is
-      # never created and the post-job cache save fails the whole job with
-      # "Path Validation Error: Path(s) specified in the action for caching
-      # do(es) not exist" even when every audit step passed.
-      - name: Setup Node
-        uses: actions/setup-node@e51e5fe84fc33b4c73ebe40526b2694712b5b858 # v4.3.0
-        with:
-          node-version: 22
-
-      # This is a pnpm workspace: the single pnpm-lock.yaml at the repo root
-      # covers every package, and no package-lock.json exists anywhere. The
-      # audit therefore runs once from the root rather than per-directory.
-      - name: Warn on moderate and above vulnerabilities
-        run: pnpm audit --audit-level=moderate || true
-
-      # Enforced, not suppressed. Repairing this job (it had been failing on
-      # ENOLOCK rather than actually auditing) exposed 203 findings; the 6
-      # criticals are now fixed outright via root pnpm.overrides and the jspdf
-      # 4.x bump, leaving 0 critical. The residual 76 high / 60 moderate are
-      # transitive-only under Expo/react-native and Trezor and need upstream
-      # releases; #1025 raises this gate to `high` when they land.
-      - name: Fail on critical vulnerabilities
-        run: pnpm audit --audit-level=critical
-
-  audit-go:
-    name: Dependency Audit (Go)
+  deps:
+    name: Dependency audit (${{ matrix.tool }})
+    needs: changes
+    if: needs.changes.outputs.deps_matrix != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -308,16 +283,10 @@ jobs:
   # scans them for OS/package-level CVEs the source-level scans above never
   # see (#1532). The dapp has no production Dockerfile yet (only
   # Dockerfile.dev), it deploys as a built Next.js artifact, not a container,
-  # per .github/workflows/deploy-staging.yml, so there is nothing to scan or
-  # sign for it until that changes.
+  # so there is nothing to scan for it until that changes.
   #
-  # Images are built and scanned here but not pushed to a registry: no
-  # release/push pipeline exists yet for either image (deploy-staging.yml
-  # deploys built binaries directly, not containers), so there is nothing to
-  # attach cosign signing or signature verification to. That half of this
-  # issue's acceptance criteria needs the release pipeline to exist first;
-  # tracked as a follow-up rather than attempted against infrastructure that
-  # isn't there.
+  # Images are built and scanned here but not pushed; release images are
+  # pushed only by deploy.yml's build-images job on a release tag.
   image-scan:
     name: Image scan (Trivy)
     needs: changes
