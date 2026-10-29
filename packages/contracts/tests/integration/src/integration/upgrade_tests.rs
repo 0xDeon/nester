@@ -111,10 +111,12 @@ fn test_upgrade_wasm_swap_preserves_all_state() {
         pre_bob,
         "Bob's share balance must not change across upgrade"
     );
+    // pre_total was taken while YIELD was still vesting; the stream survived
+    // the upgrade and has now fully vested, so exactly YIELD is added.
     assert_eq!(
         h.token().total_assets(),
-        pre_total,
-        "total_assets must not change across upgrade"
+        pre_total + YIELD,
+        "total_assets must change only by the vested yield across upgrade"
     );
 }
 

@@ -14,7 +14,7 @@ extern crate std;
 
 use soroban_sdk::{
     testutils::{Events as _, Ledger as _},
-    IntoVal, Symbol,
+    IntoVal, Symbol, TryFromVal, Val,
 };
 
 use nester_access_control::Role;
@@ -36,6 +36,12 @@ fn no_fees(h: &NesterHarness) {
 }
 
 /// Return the last event's topic[0] and topic[1] as `Symbol`s.
+/// A topic as a Symbol, or None for non-Symbol topics such as the Address
+/// topics on the deposit token's own transfer events.
+fn topic_symbol(h: &NesterHarness, topic: Val) -> Option<Symbol> {
+    Symbol::try_from_val(&h.env, &topic).ok()
+}
+
 fn last_event_topics(h: &NesterHarness) -> (Symbol, Symbol) {
     let events = h.env.events().all();
     let (_, topics, _) = events.last().expect("expected at least one event").clone();
@@ -120,10 +126,7 @@ fn report_yield_emits_yld_strt_event() {
     let expected = Symbol::new(&h.env, "YLD_STRT");
     let events = h.env.events().all();
     let has_yld_strt = events.iter().any(|(_, topics, _)| {
-        topics.len() >= 2 && {
-            let t1: Symbol = topics.get(1).unwrap().into_val(&h.env);
-            t1 == expected
-        }
+        topics.len() >= 2 && topic_symbol(&h, topics.get(1).unwrap()) == Some(expected.clone())
     });
 
     assert!(has_yld_strt, "report_yield must emit a YLD_STRT event");
@@ -150,10 +153,7 @@ fn harvest_event_topics_match_events_md() {
     let expected = Symbol::new(&h.env, "HARVEST");
     let events = h.env.events().all();
     let has_harvest = events.iter().any(|(_, topics, _)| {
-        topics.len() >= 2 && {
-            let t1: Symbol = topics.get(1).unwrap().into_val(&h.env);
-            t1 == expected
-        }
+        topics.len() >= 2 && topic_symbol(&h, topics.get(1).unwrap()) == Some(expected.clone())
     });
 
     assert!(has_harvest, "harvest must emit a HARVEST event");
@@ -198,8 +198,12 @@ fn generate_event_fixtures() {
         if topics.len() < 2 {
             continue;
         }
-        let t0: Symbol = topics.get(0).unwrap().into_val(&h.env);
-        let t1: Symbol = topics.get(1).unwrap().into_val(&h.env);
+        let (Some(t0), Some(t1)) = (
+            topic_symbol(&h, topics.get(0).unwrap()),
+            topic_symbol(&h, topics.get(1).unwrap()),
+        ) else {
+            continue;
+        };
 
         // Symbols implement Debug in testutils.
         entries.push(std::format!(

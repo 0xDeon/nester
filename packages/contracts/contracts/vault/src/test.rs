@@ -1738,6 +1738,9 @@ fn test_harvest_rate_limit_is_per_user() {
     vault.deposit(&alice, &(1_000 * XLM), &0);
     vault.deposit(&bob, &(1_000 * XLM), &0);
 
+    // The vault records "never harvested" as timestamp 0, and the test ledger
+    // starts at 0; move off it so Alice's first harvest is recorded.
+    advance_time(&env, 1);
     vault.harvest(&alice);
     // Alice's harvest must not block Bob.
     assert!(vault.try_harvest(&bob).is_ok());

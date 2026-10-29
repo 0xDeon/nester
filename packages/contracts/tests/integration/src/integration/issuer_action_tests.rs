@@ -16,7 +16,9 @@
 
 extern crate std;
 
-use soroban_sdk::token::StellarAssetClient;
+use soroban_sdk::token::{StellarAssetClient, TokenClient};
+
+use nester_access_control::Role;
 
 use nester_test_utils::NesterHarness;
 use vault_contract::FeeConfig;
@@ -58,6 +60,9 @@ fn test_clawback_impairment_prorata_withdrawal() {
     let clawback_amount = DEPOSIT * 2 / 5; // 40 USDC
     StellarAssetClient::new(&h.env, &h.deposit_token_id).clawback(&h.vault_id, &clawback_amount);
 
+    // report_yield requires the Manager (or Attester) role.
+    h.vault().grant_role(&h.admin, &h.admin, &Role::Manager);
+
     // Admin reconciles: report a negative yield equal to the clawback.
     h.vault().report_yield(&h.admin, &(-clawback_amount));
 
@@ -65,10 +70,11 @@ fn test_clawback_impairment_prorata_withdrawal() {
     assert_eq!(h.token().total_assets(), DEPOSIT * 2 - clawback_amount);
 
     // Alice withdraws her half (80 USDC worth of shares → 80 USDC out).
+    let usdc = TokenClient::new(&h.env, &h.deposit_token_id);
     let alice_shares = h.token().balance(&alice);
-    let before = h.token().balance(&alice);
+    let before = usdc.balance(&alice);
     h.vault().withdraw(&alice, &alice_shares, &0);
-    let after = h.token().balance(&alice);
+    let after = usdc.balance(&alice);
 
     // Alice should receive exactly 80 USDC (her pro-rata 50% of 160).
     let expected = (DEPOSIT * 2 - clawback_amount) / 2;
@@ -91,6 +97,9 @@ fn test_no_performance_fee_after_net_impairment() {
     let yield_report = DEPOSIT / 10;
 
     StellarAssetClient::new(&h.env, &h.deposit_token_id).clawback(&h.vault_id, &clawback);
+
+    // report_yield requires the Manager (or Attester) role.
+    h.vault().grant_role(&h.admin, &h.admin, &Role::Manager);
     h.vault().report_yield(&h.admin, &(-clawback));
     h.vault().report_yield(&h.admin, &yield_report);
 

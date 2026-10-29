@@ -163,9 +163,24 @@ fn generate_rounding_fixture() {
 
     // Sweep: total_assets and total_shares independently across 5 orders of
     // magnitude; amount is a fixed fraction of the smaller of the two.
-    let pool_sizes: &[i128] = &[1, 7, 100, 10_000, 1_000_000, 10_000_000, 100_000_000];
-    let ratios: &[i128] = &[1, 2, 5, 10, 100];
-    let amt_fracs: &[i128] = &[1, 10, 100, 1_000, 10_000];
+    // Odd sizes and ratios (3, 7, 99, 101, 9_999) put the division remainder
+    // on both sides of the halfway point, where floor and ceil differ.
+    let pool_sizes: &[i128] = &[
+        1,
+        3,
+        7,
+        99,
+        100,
+        101,
+        9_999,
+        10_000,
+        1_000_000,
+        10_000_000,
+        100_000_000,
+        1_000_000_000_000,
+    ];
+    let ratios: &[i128] = &[1, 2, 3, 5, 7, 10, 100, 1_000];
+    let amt_fracs: &[i128] = &[1, 2, 3, 7, 10, 100, 1_000, 10_000];
 
     for &ta_base in pool_sizes {
         for &ratio in ratios {
