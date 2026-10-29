@@ -80,8 +80,8 @@ test.describe("Vault Creation E2E", () => {
     const assembledXdr = assembled.toXDR();
 
     // Sign
-    const signedTransaction = keypair.signTransaction(assembled);
-    const signedXdr = signedTransaction.toXDR();
+    assembled.sign(keypair);
+    const signedXdr = assembled.toXDR();
 
     // Submit
     const submitResult = await server.sendTransaction(
@@ -116,7 +116,10 @@ test.describe("Vault Creation E2E", () => {
     );
 
     // Extract contract address from return value
-    const returnValue = getResult.returnValue;
+    const returnValue =
+      getResult.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS
+        ? getResult.returnValue
+        : undefined;
     expect(returnValue).toBeDefined();
 
     const contractAddress = Address.fromScVal(returnValue!).toString();

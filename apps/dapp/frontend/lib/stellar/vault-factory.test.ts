@@ -38,27 +38,27 @@ vi.mock("@/lib/networks", () => ({
 
 // Mock the stellar-sdk module BEFORE importing vault-factory
 vi.mock("@stellar/stellar-sdk", () => {
-  const AddressMock = vi.fn(function(address: string) {
+  const AddressMock = vi.fn(function(this: any, address: string) {
     this.address = address;
   });
-  AddressMock.fromScVal = vi.fn();
+  (AddressMock as any).fromScVal = vi.fn();
   AddressMock.prototype.toScVal = vi.fn().mockReturnValue({ type: "address" });
   
-  const ContractMock = vi.fn(function(contractId: string) {
+  const ContractMock = vi.fn(function(this: any, contractId: string) {
     this.contractId = contractId;
   });
   ContractMock.prototype.call = vi.fn().mockReturnValue({
     toXDR: vi.fn().mockReturnValue("operation_xdr"),
   });
   
-  const TransactionBuilderMock = vi.fn(function(account, options) {
+  const TransactionBuilderMock = vi.fn(function(this: any, account: unknown, options: unknown) {
     this.account = account;
     this.options = options;
   });
-  TransactionBuilderMock.prototype.addOperation = vi.fn(function() {
+  TransactionBuilderMock.prototype.addOperation = vi.fn(function(this: any) {
     return this;
   });
-  TransactionBuilderMock.prototype.setTimeout = vi.fn(function() {
+  TransactionBuilderMock.prototype.setTimeout = vi.fn(function(this: any) {
     return this;
   });
   TransactionBuilderMock.prototype.build = vi.fn(function() {
@@ -149,7 +149,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         true
@@ -184,7 +184,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -226,7 +226,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -273,7 +273,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -327,7 +327,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -389,7 +389,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -450,7 +450,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -500,7 +500,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -564,7 +564,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -651,7 +651,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -718,7 +718,7 @@ describe("vault-factory", () => {
       };
 
       vi.mocked(StellarSdk.rpc.Server).mockImplementation(
-        () => mockServer as any
+        function () { return mockServer; } as any
       );
       vi.mocked(StellarSdk.rpc.Api.isSimulationError).mockReturnValue(
         false
@@ -754,8 +754,7 @@ describe("vault-factory", () => {
     });
 
     it("should not log raw transaction XDR in production", async () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "production";
+      vi.stubEnv("NODE_ENV", "production");
 
       const consoleWarnSpy = vi.spyOn(console, "warn");
       const consoleLogSpy = vi.spyOn(console, "log");
@@ -767,7 +766,7 @@ describe("vault-factory", () => {
 
       consoleLogSpy.mockRestore();
       consoleWarnSpy.mockRestore();
-      process.env.NODE_ENV = originalEnv;
+      vi.unstubAllEnvs();
     });
 
     it("should use HTTPS for production RPC URLs", () => {
