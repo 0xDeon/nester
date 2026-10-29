@@ -4,7 +4,7 @@ Operational guide for monitoring, debugging, and responding to smoke test failur
 
 **Related Documentation**:
 - Test implementation: `apps/dapp/frontend/tests/smoke/README.md`
-- Workflow definition: `.github/workflows/deploy-staging.yml`
+- Workflow definition: `.github/workflows/deploy.yml`
 
 ## Quick Reference
 

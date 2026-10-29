@@ -36,7 +36,7 @@ services:
     # Pinned to an immutable digest resolved from the release tag by the
     # deploy-production workflow, never a mutable tag like `:latest` or
     # `:staging-<sha>`. ${API_IMAGE_DIGEST} is injected by that workflow at
-    # deploy time (see .github/workflows/deploy-production.yml).
+    # deploy time (see .github/workflows/deploy.yml).
     image: ghcr.io/suncrestlabs/nester-api@${API_IMAGE_DIGEST:?set by the deploy-production workflow}
     container_name: nester_api_production
     environment:
@@ -49,7 +49,7 @@ services:
       - STELLAR_OPERATOR_SECRET=${STELLAR_OPERATOR_SECRET:?set in deploy/production/.env}
       - APP_ENV=production
       # Migrations run as their own approved job (see the migrate job in
-      # deploy-production.yml), never automatically from the long-running
+      # deploy.yml), never automatically from the long-running
       # API container in production.
       - RUN_MIGRATIONS=false
     depends_on:

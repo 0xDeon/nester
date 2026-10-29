@@ -1,0 +1,871 @@
+name: Deploy
+
+# Staging and production deploys. The trigger picks the target:
+#
+#   workflow_dispatch   staging: builds from source, deploys, smoke-tests.
+#   push tag v*.*.*     production: builds and pushes release images for the
+#                       tag, pins them by digest, migrates, deploys behind the
+#                       `production` environment approval, smoke-tests, and
+#                       rolls back automatically on a smoke failure. The tag is
+#                       the immutable, auditable record of what got deployed.
+#
+# Every staging job is gated on workflow_dispatch and every production job on
+# the tag, so one trigger never touches the other environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_smoke_tests:
+        description: "Skip smoke test gating (emergency override, use with caution)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deploy per environment at a time, never cancelled: cancelling
+  # mid-migration or mid-rollout is its own hazard. Don't push two release
+  # tags back to back without checking the first one finished.
+  group: deploy-${{ github.ref_type == 'tag' && 'production' || 'staging' }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE: ghcr.io/suncrestlabs/nester-api
+  SIGNER_IMAGE: ghcr.io/suncrestlabs/nester-signer
+  IMAGE_TAG: staging-${{ github.sha }}
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════
+  # STAGING (workflow_dispatch)
+  # ════════════════════════════════════════════════════════════════════
+  # ────────────────────────────────────────────────────────────────────
+  # Detect changes (reuse shared logic from CI)
+  # ────────────────────────────────────────────────────────────────────
+  staging-changes:
+    name: "Detect changes"
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      dapp: ${{ steps.filter.outputs.dapp }}
+      api: ${{ steps.filter.outputs.api }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dorny/paths-filter@b41dfa943b1939b9b646f67753bfe35cf6e4de03 # v3.0.2
+        id: filter
+        with:
+          base: ${{ github.event_name == 'push' && github.event.before || '' }}
+          filters: |
+            dapp:
+              - 'apps/dapp/**'
+              - 'packages/shared/**'
+            api:
+              - 'apps/api/**'
+              - 'packages/shared/**'
+            contracts:
+              - 'packages/contracts/**'
+
+  # ────────────────────────────────────────────────────────────────────
+  # Build dApp frontend
+  # ────────────────────────────────────────────────────────────────────
+  staging-build-dapp:
+    name: "Build dApp"
+    needs: staging-changes
+    if: needs.staging-changes.outputs.dapp == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: ./.github/actions/setup
+        with:
+          node: "true"
+          install: "false"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build dApp
+        run: pnpm --filter @nester/dapp build
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.STAGING_API_URL || 'https://api-staging.nester.dev/api/v1' }}
+          NEXT_PUBLIC_WS_URL: ${{ vars.STAGING_WS_URL || 'wss://api-staging.nester.dev/ws' }}
+          NEXT_PUBLIC_STELLAR_NETWORK: "Test SDF Network ; September 2015"
+          NEXT_PUBLIC_STELLAR_RPC_URL: "https://soroban-testnet.stellar.org"
+          NEXT_PUBLIC_STELLAR_HORIZON_URL: "https://horizon-testnet.stellar.org"
+
+      - name: Upload dApp artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dapp-build
+          path: apps/dapp/frontend/.next/
+          retention-days: 1
+
+  # ────────────────────────────────────────────────────────────────────
+  # Build API
+  # ────────────────────────────────────────────────────────────────────
+  staging-build-api:
+    name: "Build API"
+    needs: staging-changes
+    if: needs.staging-changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+
+      - name: Build API
+        run: |
+          cd apps/api
+          go build -o nester-api ./cmd/api
+          go build -o nester-signer ./cmd/signer
+
+      - name: Run API tests
+        run: |
+          cd apps/api
+          go test -race -timeout 120s -short ./...
+
+      - name: Upload API artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: api-build
+          path: |
+            apps/api/nester-api
+            apps/api/nester-signer
+          retention-days: 1
+
+  # ────────────────────────────────────────────────────────────────────
+  # Deploy to staging environment
+  # ────────────────────────────────────────────────────────────────────
+  staging-deploy:
+    name: "Deploy to Staging"
+    needs: [staging-build-dapp, staging-build-api]
+    if: |
+      always() && github.event_name == 'workflow_dispatch' &&
+      (needs.staging-build-dapp.result == 'success' || needs.staging-build-dapp.result == 'skipped') &&
+      (needs.staging-build-api.result == 'success' || needs.staging-build-api.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      staging_url: ${{ steps.deploy.outputs.url }}
+      deployment_id: ${{ steps.deploy.outputs.deployment_id }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check required secrets
+        env:
+          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$STAGING_DEPLOY_TOKEN" ]; then
+            echo "::error::STAGING_DEPLOY_TOKEN is not configured. This secret is required to deploy to staging."
+            echo "Set it in GitHub repository settings: Settings → Secrets and variables → Actions → STAGING_DEPLOY_TOKEN"
+            echo "See docs/ci/secrets.md for details."
+            exit 1
+          fi
+
+      - name: Download dApp artifacts
+        if: needs.staging-build-dapp.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dapp-build
+          path: apps/dapp/frontend/.next/
+
+      - name: Download API artifacts
+        if: needs.staging-build-api.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: api-build
+          path: apps/api/
+
+      - name: Deploy to staging
+        id: deploy
+        env:
+          STAGING_DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
+          STAGING_ENDPOINT: ${{ vars.STAGING_ENDPOINT || 'https://deploy-api.staging.nester.dev' }}
+        run: |
+          # This is a placeholder; replace with actual deploy script/tool
+          # Examples: Kubernetes, Docker Swarm, serverless deployment, etc.
+          echo "Deploying to staging environment..."
+
+          # Example: Deploy via kubectl
+          # kubectl set image deployment/nester-dapp \
+          #   dapp=gcr.io/nester/dapp:${{ env.IMAGE_TAG }} \
+          #   -n staging
+
+          # For now, simulate successful deployment
+          echo "url=https://staging.nester.dev" >> $GITHUB_OUTPUT
+          echo "deployment_id=$(date +%s)" >> $GITHUB_OUTPUT
+          echo "Deployment complete: https://staging.nester.dev"
+
+      - name: Wait for staging services
+        run: |
+          # Wait for liveness first: a process that isn't even answering yet
+          # (still starting, container not scheduled) is a different failure
+          # mode than one that's up but not ready, and this keeps that
+          # distinction visible in the log instead of collapsing both into
+          # one generic timeout.
+          for i in {1..30}; do
+            if curl -s https://staging.nester.dev/health > /dev/null; then
+              echo "Staging services live"
+              exit 0
+            fi
+            echo "Waiting for staging services ($i/30)..."
+            sleep 2
+          done
+          echo "Staging services did not become live"
+          exit 1
+
+      # ────────────────────────────────────────────────────────────────
+      # POST-DEPLOY READINESS GATE (nester#1349)
+      # ────────────────────────────────────────────────────────────────
+      # /health only proves the process is up (liveness). /readyz is the
+      # stricter check the load balancer itself gates traffic on: it fails
+      # closed on Postgres, Redis, Soroban RPC, and indexer staleness (see
+      # readinessHandler in apps/api/cmd/api/main.go), so a deploy that
+      # passes liveness but never reaches readiness -- a bad migration, a
+      # misconfigured RPC endpoint, a stale indexer -- fails this job
+      # instead of shipping and only surfacing once real traffic hits it.
+      - name: Wait for API readiness
+        id: readiness
+        env:
+          STAGING_API_URL: ${{ vars.STAGING_API_URL || 'https://api-staging.nester.dev/api/v1' }}
+        run: |
+          # /readyz lives on the API's own origin, not under /api/v1 (see
+          # registerHealthRoutes in apps/api/cmd/api/main.go), so strip the
+          # path suffix rather than hardcoding a second staging URL that
+          # could drift from STAGING_API_URL.
+          READYZ_URL="${STAGING_API_URL%/api/v1}/readyz"
+          echo "Polling $READYZ_URL"
+
+          for i in $(seq 1 30); do
+            HTTP_CODE=$(curl -s -o /tmp/readyz-body -w '%{http_code}' "$READYZ_URL" || echo "000")
+            BODY=$(cat /tmp/readyz-body 2>/dev/null || echo "")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "API ready: $BODY"
+              exit 0
+            fi
+
+            echo "Not ready yet ($i/30): HTTP $HTTP_CODE, $BODY"
+            sleep 2
+          done
+
+          echo "::error::API did not become ready within the timeout. Last response: HTTP $HTTP_CODE, $BODY"
+          exit 1
+
+  # ────────────────────────────────────────────────────────────────────
+  # SMOKE TEST GATING JOB
+  # ────────────────────────────────────────────────────────────────────
+  # This job runs AFTER deploy succeeds and FAILS the workflow if smoke
+  # tests do not pass, preventing promotion to production.
+  # ────────────────────────────────────────────────────────────────────
+  staging-smoke-test:
+    name: "Smoke Tests (Gating)"
+    runs-on: ubuntu-latest
+    needs: staging-deploy
+    if: github.event.inputs.skip_smoke_tests != 'true'
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: ./.github/actions/setup
+        with:
+          node: "true"
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @nester/dapp exec playwright install chromium --with-deps
+
+      - name: Run smoke tests
+        id: smoke
+        env:
+          # Staging environment configuration
+          STAGING_URL: ${{ needs.staging-deploy.outputs.staging_url || 'https://staging.nester.dev' }}
+          SMOKE_TEST: "1"
+          SMOKE_TEST_WALLET_SECRET: ${{ secrets.SMOKE_TEST_WALLET_SECRET }}
+
+          # Optional: Testnet overrides if staging uses different network
+          # NEXT_PUBLIC_STELLAR_NETWORK: "Test SDF Network ; September 2015"
+          # NEXT_PUBLIC_STELLAR_RPC_URL: "https://soroban-testnet.stellar.org"
+          # NEXT_PUBLIC_STELLAR_HORIZON_URL: "https://horizon-testnet.stellar.org"
+        run: |
+          if [ -z "$SMOKE_TEST_WALLET_SECRET" ]; then
+            echo "::error::SMOKE_TEST_WALLET_SECRET is not configured. This secret is required for smoke tests."
+            echo "Set it in GitHub repository settings: Settings → Secrets and variables → Actions → SMOKE_TEST_WALLET_SECRET"
+            echo "See docs/ci/secrets.md for details."
+            exit 1
+          fi
+
+          cd apps/dapp/frontend
+
+          # `--run` is a Vitest flag; Playwright rejects it with "unknown
+          # option" before running a single test. The JSON reporter also
+          # needs an explicit output path or nothing is written to disk.
+          set +e
+          PLAYWRIGHT_JSON_OUTPUT_NAME=smoke-result.json \
+          npx playwright test tests/smoke.spec.ts \
+            --reporter=html,json,list
+          TEST_EXIT_CODE=$?
+          set -e
+
+          # Capture immediately after the command; any intervening
+          # statement overwrites $? and would mask a real failure.
+          echo "test_exit_code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $TEST_EXIT_CODE
+
+      - name: Extract smoke result summary
+        if: always()
+        id: summary
+        run: |
+          # Parse smoke-result.json if available
+          if [ -f "apps/dapp/frontend/smoke-result.json" ]; then
+            RESULT=$(cat apps/dapp/frontend/smoke-result.json)
+            PASSED=$(echo "$RESULT" | jq '[.suites[]?.specs[]?.tests[]?.results[]? | select(.status=="passed")] | length')
+            FAILED=$(echo "$RESULT" | jq '[.suites[]?.specs[]?.tests[]?.results[]? | select(.status!="passed" and .status!="skipped")] | length')
+            DURATION=$(echo "$RESULT" | jq '[.suites[]?.specs[]?.tests[]?.results[]?.duration // 0] | add // 0')
+            DURATION_SEC=$(($DURATION / 1000))
+            
+            if [ "$FAILED" -eq 0 ]; then
+              STATUS="PASS"
+              SUMMARY="✓ All smoke tests passed ($PASSED steps, ${DURATION_SEC}s)"
+            else
+              STATUS="FAIL"
+              FAILED_STEP=$(echo "$RESULT" | jq -r '[.suites[]?.specs[]? | select(.ok==false) | .title][0] // "unknown"')
+              SUMMARY="✗ Smoke tests failed at '$FAILED_STEP' ($PASSED/$((PASSED+FAILED)) steps, ${DURATION_SEC}s)"
+            fi
+            
+            echo "status=$STATUS" >> $GITHUB_OUTPUT
+            echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
+            
+            # Write to job summary
+            echo "## Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "$SUMMARY" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Run ID**: $(echo "$RESULT" | jq -r '.runId')" >> $GITHUB_STEP_SUMMARY
+            echo "**Started**: $(echo "$RESULT" | jq -r '.startedAt')" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Step Details" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$RESULT" | jq -r '.steps[] | "[\(.status)] \(.name): \(.message) (\(.durationMs)ms)"' >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "status=UNKNOWN" >> $GITHUB_OUTPUT
+            echo "summary=Could not parse smoke-result.json" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-test-results-${{ github.run_id }}
+          path: |
+            apps/dapp/frontend/playwright-report/
+            apps/dapp/frontend/test-results/
+            apps/dapp/frontend/smoke-result.json
+          retention-days: 30
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@fcfb566f8b0aab22203f066d80ca1d7e4b5d05b3 # v1.27.1
+        with:
+          payload: |
+            {
+              "text": "🚨 Staging Deployment Smoke Tests Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Smoke Test Failure Alert*\n${{ steps.summary.outputs.summary }}\n<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Details>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOYMENT_WEBHOOK }}
+
+      - name: Enforce smoke test gating
+        if: failure()
+        run: |
+          echo "❌ Smoke tests failed. Deployment is gated."
+          echo ""
+          echo "To promote after fixing issues:"
+          echo "1. Review smoke test failures in the artifact"
+          echo "2. Deploy fixes and re-run this workflow"
+          echo "3. Or manually approve override if transient (see runbook)"
+          exit 1
+
+  # ────────────────────────────────────────────────────────────────────
+  # Promotion gate (prevents accidental production deployments)
+  # ────────────────────────────────────────────────────────────────────
+  staging-promotion-gate:
+    name: "Promotion Gate"
+    runs-on: ubuntu-latest
+    needs: [staging-deploy, staging-smoke-test]
+    if: always() && github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Check deployment and smoke test status
+        run: |
+          DEPLOY_RESULT="${{ needs.staging-deploy.result }}"
+          SMOKE_RESULT="${{ needs.staging-smoke-test.result }}"
+
+          if [ "$DEPLOY_RESULT" != "success" ]; then
+            echo "❌ Deployment failed (status: $DEPLOY_RESULT)"
+            exit 1
+          fi
+
+          if [ "$SMOKE_RESULT" = "failure" ]; then
+            echo "❌ Smoke tests failed - promotion blocked"
+            exit 1
+          fi
+
+          if [ "$SMOKE_RESULT" = "skipped" ]; then
+            echo "⚠️  Smoke tests were skipped - promotion allowed but not recommended"
+          fi
+
+          echo "✅ All checks passed - promotion to production allowed"
+
+      - name: Report status
+        if: success()
+        run: |
+          echo "Deployment: ${{ needs.staging-deploy.result }}"
+          echo "Smoke Tests: ${{ needs.staging-smoke-test.result }}"
+          echo "Status: Ready for production promotion"
+
+  # ════════════════════════════════════════════════════════════════════
+  # PRODUCTION (release tag push)
+  # ════════════════════════════════════════════════════════════════════
+  # ────────────────────────────────────────────────────────────────────
+  # Build and push the release images for this tag.
+  # ────────────────────────────────────────────────────────────────────
+  # Production never builds from source after this point: every later job,
+  # including rollback, pins to the content digest of the images pushed here.
+  # Release tags are cut from commits that already passed CI on main.
+  # ────────────────────────────────────────────────────────────────────
+  build-images:
+    name: "Build release image (${{ matrix.name }})"
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+          - name: signer
+            dockerfile: apps/api/Dockerfile.signer
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }} image
+        env:
+          IMAGE: ${{ matrix.name == 'api' && env.API_IMAGE || env.SIGNER_IMAGE }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          docker build -f "$DOCKERFILE" -t "$IMAGE:$TAG" apps/api
+          docker push "$IMAGE:$TAG"
+
+  # ────────────────────────────────────────────────────────────────────
+  # Resolve the release tag to immutable image digests.
+  # ────────────────────────────────────────────────────────────────────
+  resolve-digests:
+    name: "Resolve image digests"
+    needs: build-images
+    runs-on: ubuntu-latest
+    outputs:
+      api_digest: ${{ steps.resolve.outputs.api_digest }}
+      signer_digest: ${{ steps.resolve.outputs.signer_digest }}
+      previous_api_digest: ${{ steps.previous.outputs.api_digest }}
+      previous_signer_digest: ${{ steps.previous.outputs.signer_digest }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve tag to digests
+        id: resolve
+        run: |
+          set -euo pipefail
+          API_DIGEST=$(docker buildx imagetools inspect "${{ env.API_IMAGE }}:${{ github.ref_name }}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          SIGNER_DIGEST=$(docker buildx imagetools inspect "${{ env.SIGNER_IMAGE }}:${{ github.ref_name }}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+
+          if [ -z "$API_DIGEST" ] || [ -z "$SIGNER_DIGEST" ]; then
+            echo "::error::Could not resolve ${{ github.ref_name }} to an image digest. Did build-images push it?"
+            exit 1
+          fi
+
+          echo "api_digest=$API_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "signer_digest=$SIGNER_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${{ github.ref_name }} -> api@$API_DIGEST, signer@$SIGNER_DIGEST"
+
+      # The digest this release is replacing, recorded up front (not inside
+      # the rollback job) so rollback never has to guess "previous" under
+      # pressure after something has already gone wrong -- it just reads what
+      # was captured here before this deploy touched anything.
+      - name: Record currently-deployed digests for rollback
+        id: previous
+        env:
+          KUBE_CONFIG: ${{ secrets.PRODUCTION_KUBE_CONFIG }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KUBE_CONFIG" ]; then
+            echo "::error::PRODUCTION_KUBE_CONFIG is not configured. Required to read the currently-deployed digest before rolling forward."
+            exit 1
+          fi
+          echo "$KUBE_CONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+
+          CURRENT_API=$(kubectl get deployment nester-api-production -n nester-production -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          CURRENT_SIGNER=$(kubectl get deployment nester-signer-production -n nester-production -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+
+          echo "api_digest=${CURRENT_API#*@}" >> "$GITHUB_OUTPUT"
+          echo "signer_digest=${CURRENT_SIGNER#*@}" >> "$GITHUB_OUTPUT"
+          echo "Previously deployed: api@${CURRENT_API#*@}, signer@${CURRENT_SIGNER#*@}"
+          rm -f "$RUNNER_TEMP/kubeconfig"
+
+  # ────────────────────────────────────────────────────────────────────
+  # Production approval gate. Everything from here on requires a reviewer
+  # on the `production` GitHub Environment to approve the run.
+  #
+  # NOTE (disclosed, not configurable from this file): referencing
+  # `environment: production` below only POINTS this job at the Environment;
+  # it does not create or configure it. A maintainer with repo admin access
+  # must create the `production` Environment in Settings -> Environments and
+  # add required reviewers there -- that part cannot be done from a workflow
+  # file. Until that's configured, this job runs without a human gate.
+  # ────────────────────────────────────────────────────────────────────
+  migrate:
+    name: "Run production migrations"
+    needs: resolve-digests
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check required secrets
+        env:
+          KUBE_CONFIG: ${{ secrets.PRODUCTION_KUBE_CONFIG }}
+        run: |
+          if [ -z "$KUBE_CONFIG" ]; then
+            echo "::error::PRODUCTION_KUBE_CONFIG is not configured. Settings -> Secrets and variables -> Actions -> PRODUCTION_KUBE_CONFIG."
+            exit 1
+          fi
+
+      - name: Render migration job manifest
+        env:
+          API_DIGEST: ${{ needs.resolve-digests.outputs.api_digest }}
+          SIGNER_DIGEST: ${{ needs.resolve-digests.outputs.signer_digest }}
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import os
+          content = open('deploy/production/k8s-production.yaml').read()
+          content = content.replace('ghcr.io/suncrestlabs/nester-api@__API_IMAGE_DIGEST__', '${{ env.API_IMAGE }}@' + os.environ['API_DIGEST'])
+          content = content.replace('ghcr.io/suncrestlabs/nester-signer@__SIGNER_IMAGE_DIGEST__', '${{ env.SIGNER_IMAGE }}@' + os.environ['SIGNER_DIGEST'])
+          open('$RUNNER_TEMP/k8s-production.rendered.yaml', 'w').write(content)
+          "
+
+      - name: Run migration job
+        env:
+          KUBE_CONFIG: ${{ secrets.PRODUCTION_KUBE_CONFIG }}
+        run: |
+          set -euo pipefail
+          echo "$KUBE_CONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+
+          kubectl delete job nester-api-migrate -n nester-production --ignore-not-found
+          kubectl apply -f <(python3 -c "
+          import yaml, sys
+          docs = list(yaml.safe_load_all(open('$RUNNER_TEMP/k8s-production.rendered.yaml')))
+          for d in docs:
+              if d.get('kind') == 'Job':
+                  yaml.safe_dump(d, sys.stdout)
+          ")
+
+          echo "Waiting for the migration job's pod to log completion..."
+          # See the KNOWN LIMITATION note in deploy/production/k8s-production.yaml:
+          # the api binary keeps serving after migrating rather than exiting, so
+          # completion is read from the log line main.go emits
+          # ("database migrations complete"), not from the Job's pod phase.
+          for _ in $(seq 1 30); do
+            LOGS=$(kubectl logs job/nester-api-migrate -n nester-production 2>/dev/null || echo "")
+            if echo "$LOGS" | grep -q "database migrations complete"; then
+              echo "Migrations complete."
+              kubectl delete job nester-api-migrate -n nester-production
+              rm -f "$RUNNER_TEMP/kubeconfig"
+              exit 0
+            fi
+            if echo "$LOGS" | grep -qi "auto-migrate:.*error\|panic:"; then
+              echo "::error::Migration job logged an error:"
+              echo "$LOGS"
+              kubectl delete job nester-api-migrate -n nester-production --ignore-not-found
+              rm -f "$RUNNER_TEMP/kubeconfig"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "::error::Migration job did not log completion within the timeout."
+          kubectl logs job/nester-api-migrate -n nester-production || true
+          kubectl delete job nester-api-migrate -n nester-production --ignore-not-found
+          rm -f "$RUNNER_TEMP/kubeconfig"
+          exit 1
+
+  # ────────────────────────────────────────────────────────────────────
+  # Deploy API + signer at the pinned digests.
+  # ────────────────────────────────────────────────────────────────────
+  production-deploy:
+    name: "Deploy to Production"
+    needs: [resolve-digests, migrate]
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      deployed_api_digest: ${{ needs.resolve-digests.outputs.api_digest }}
+      deployed_signer_digest: ${{ needs.resolve-digests.outputs.signer_digest }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check required secrets
+        env:
+          KUBE_CONFIG: ${{ secrets.PRODUCTION_KUBE_CONFIG }}
+        run: |
+          if [ -z "$KUBE_CONFIG" ]; then
+            echo "::error::PRODUCTION_KUBE_CONFIG is not configured. Settings -> Secrets and variables -> Actions -> PRODUCTION_KUBE_CONFIG."
+            exit 1
+          fi
+
+      - name: Render and apply manifests
+        env:
+          KUBE_CONFIG: ${{ secrets.PRODUCTION_KUBE_CONFIG }}
+          API_DIGEST: ${{ needs.resolve-digests.outputs.api_digest }}
+          SIGNER_DIGEST: ${{ needs.resolve-digests.outputs.signer_digest }}
+        run: |
+          set -euo pipefail
+          echo "$KUBE_CONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+
+          python3 -c "
+          import os
+          content = open('deploy/production/k8s-production.yaml').read()
+          content = content.replace('ghcr.io/suncrestlabs/nester-api@__API_IMAGE_DIGEST__', '${{ env.API_IMAGE }}@' + os.environ['API_DIGEST'])
+          content = content.replace('ghcr.io/suncrestlabs/nester-signer@__SIGNER_IMAGE_DIGEST__', '${{ env.SIGNER_IMAGE }}@' + os.environ['SIGNER_DIGEST'])
+          open('$RUNNER_TEMP/k8s-production.rendered.yaml', 'w').write(content)
+          "
+
+          # Apply everything except the one-shot Job, which `migrate` already
+          # ran to completion and deleted -- re-applying it here would just
+          # recreate a finished job.
+          kubectl apply -f <(python3 -c "
+          import yaml, sys
+          docs = list(yaml.safe_load_all(open('$RUNNER_TEMP/k8s-production.rendered.yaml')))
+          for d in docs:
+              if d.get('kind') != 'Job':
+                  yaml.safe_dump(d, sys.stdout)
+                  print('---')
+          ")
+
+          kubectl rollout status deployment/nester-api-production -n nester-production --timeout=5m
+          kubectl rollout status deployment/nester-signer-production -n nester-production --timeout=5m
+          rm -f "$RUNNER_TEMP/kubeconfig"
+
+      - name: Wait for API readiness
+        env:
+          PRODUCTION_API_URL: ${{ vars.PRODUCTION_API_URL || 'https://api.nester.app/api/v1' }}
+        run: |
+          READYZ_URL="${PRODUCTION_API_URL%/api/v1}/readyz"
+          echo "Polling $READYZ_URL"
+
+          for i in $(seq 1 30); do
+            HTTP_CODE=$(curl -s -o /tmp/readyz-body -w '%{http_code}' "$READYZ_URL" || echo "000")
+            BODY=$(cat /tmp/readyz-body 2>/dev/null || echo "")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "API ready: $BODY"
+              exit 0
+            fi
+
+            echo "Not ready yet ($i/30): HTTP $HTTP_CODE, $BODY"
+            sleep 2
+          done
+
+          echo "::error::API did not become ready within the timeout. Last response: HTTP $HTTP_CODE, $BODY"
+          exit 1
+
+  # ────────────────────────────────────────────────────────────────────
+  # Smoke checks against the live production deploy. Gating: a failure here
+  # triggers the rollback job below.
+  # ────────────────────────────────────────────────────────────────────
+  production-smoke-test:
+    name: "Production Smoke Checks"
+    runs-on: ubuntu-latest
+    needs: production-deploy
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: ./.github/actions/setup
+        with:
+          node: "true"
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @nester/dapp exec playwright install chromium --with-deps
+
+      - name: Run smoke tests against production
+        id: smoke
+        env:
+          # Reuses the same tests/smoke.spec.ts suite the staging smoke job runs, pointed at
+          # production instead. Nothing mainnet-specific is added here; the
+          # suite is read-only health/flow checks, not a real-funds deposit --
+          # a real mainnet deposit/withdraw canary is a separate concern
+          # (nester#1390), not part of this deploy workflow.
+          STAGING_URL: ${{ vars.PRODUCTION_URL || 'https://nester.app' }}
+          SMOKE_TEST: "1"
+          SMOKE_TEST_WALLET_SECRET: ${{ secrets.PRODUCTION_SMOKE_TEST_WALLET_SECRET }}
+        run: |
+          if [ -z "$SMOKE_TEST_WALLET_SECRET" ]; then
+            echo "::error::PRODUCTION_SMOKE_TEST_WALLET_SECRET is not configured."
+            exit 1
+          fi
+
+          cd apps/dapp/frontend
+          set +e
+          PLAYWRIGHT_JSON_OUTPUT_NAME=smoke-result.json \
+          npx playwright test tests/smoke.spec.ts \
+            --reporter="html,json,list"
+          TEST_EXIT_CODE=$?
+          set -e
+
+          echo "test_exit_code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $TEST_EXIT_CODE
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-smoke-test-results-${{ github.run_id }}
+          path: |
+            apps/dapp/frontend/playwright-report/
+            apps/dapp/frontend/test-results/
+            apps/dapp/frontend/smoke-result.json
+          retention-days: 30
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@fcfb566f8b0aab22203f066d80ca1d7e4b5d05b3 # v1
+        with:
+          payload: |
+            {
+              "text": "Production Deployment Smoke Tests Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Smoke Test Failure*\nTag: ${{ github.ref_name }}\n<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Details>\nRollback job should trigger next."
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOYMENT_WEBHOOK }}
+
+  # ────────────────────────────────────────────────────────────────────
+  # Automatic rollback to the digests captured by resolve-digests, before
+  # this deploy touched anything. Runs only when smoke-test actually failed
+  # (not when it was skipped or cancelled -- an automatic rollback on a
+  # cancelled run would fight whoever cancelled it).
+  # ────────────────────────────────────────────────────────────────────
+  rollback:
+    name: "Automatic Rollback"
+    runs-on: ubuntu-latest
+    needs: [resolve-digests, production-deploy, production-smoke-test]
+    if: needs.production-smoke-test.result == 'failure'
+    environment: production
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check we have something to roll back to
+        env:
+          PREV_API: ${{ needs.resolve-digests.outputs.previous_api_digest }}
+        run: |
+          if [ -z "$PREV_API" ]; then
+            echo "::error::No previous digest was recorded (first-ever production deploy?). Automatic rollback has nothing to roll back to -- a maintainer must intervene manually."
+            exit 1
+          fi
+
+      - name: Roll back API and signer to previous digests
+        env:
+          KUBE_CONFIG: ${{ secrets.PRODUCTION_KUBE_CONFIG }}
+          PREV_API: ${{ needs.resolve-digests.outputs.previous_api_digest }}
+          PREV_SIGNER: ${{ needs.resolve-digests.outputs.previous_signer_digest }}
+        run: |
+          set -euo pipefail
+          echo "$KUBE_CONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+
+          kubectl set image deployment/nester-api-production \
+            api="${{ env.API_IMAGE }}@${PREV_API}" \
+            -n nester-production
+          kubectl set image deployment/nester-signer-production \
+            signer="${{ env.SIGNER_IMAGE }}@${PREV_SIGNER}" \
+            -n nester-production
+
+          kubectl rollout status deployment/nester-api-production -n nester-production --timeout=5m
+          kubectl rollout status deployment/nester-signer-production -n nester-production --timeout=5m
+          rm -f "$RUNNER_TEMP/kubeconfig"
+
+          echo "Rolled back to api@${PREV_API}, signer@${PREV_SIGNER}"
+
+      - name: Notify Slack of rollback
+        if: always()
+        uses: slackapi/slack-github-action@fcfb566f8b0aab22203f066d80ca1d7e4b5d05b3 # v1
+        with:
+          payload: |
+            {
+              "text": "Production deploy of ${{ github.ref_name }} failed smoke checks and was automatically rolled back.",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Automatic Rollback*\nTag ${{ github.ref_name }} failed smoke checks.\nRolled back to api@${{ needs.resolve-digests.outputs.previous_api_digest }}\n<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Details>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOYMENT_WEBHOOK }}
+
+      - name: Fail the workflow
+        run: |
+          echo "Rolled back automatically. The original deploy still counts as a failure -- investigate before re-tagging."
+          exit 1

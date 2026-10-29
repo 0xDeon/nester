@@ -21,10 +21,9 @@ Each tool runs exactly once per change.
 
 Container image scanning (#1532) covers the two production Dockerfiles that exist today: `apps/api/Dockerfile` and
 `apps/api/Dockerfile.signer`. The dapp has no production Dockerfile (only `Dockerfile.dev`, it deploys as a built
-Next.js artifact, not a container), so there is nothing to scan for it yet. Image signing (cosign, keyless OIDC) and
-signature verification at deploy time are not implemented: neither image is pushed to a registry in any workflow today
-(`deploy-staging.yml` deploys built binaries, not containers), so there is no release pipeline to attach signing to.
-That remains open until a container-based release pipeline exists.
+Next.js artifact, not a container), so there is nothing to scan for it yet. Release images are pushed to GHCR only by
+`deploy.yml` on a `v*.*.*` tag. Image signing (cosign, keyless OIDC) and signature verification at deploy time are not
+implemented yet; the `build-images` job in `deploy.yml` is where signing would attach.
 
 ## Required status checks
 
@@ -43,9 +42,9 @@ No required job uses `continue-on-error`.
 
 ## Workflow budget
 
-`.github/workflows/` holds at most six files: `ci.yml`, `security.yml`, `nightly.yml`, `synthetic-probes.yml`,
-`deploy-staging.yml` and, once it lands, `deploy-production.yml`. Adding a seventh requires removing one, and the PR must
-say why. Every workflow declares top-level `permissions: contents: read` (jobs that need more raise it themselves), and
+`.github/workflows/` holds at most five files: `ci.yml`, `security.yml`, `scheduled.yml`, `deploy.yml` and
+`pr-policy.yml`. New work goes into whichever of these owns its trigger; adding a sixth file requires removing one, and
+the PR must say why. Every workflow declares top-level `permissions: contents: read` (jobs that need more raise it themselves), and
 every action is pinned to a commit SHA. Go, Rust and Node/pnpm setup lives in the `.github/actions/setup` composite
 action.
 
@@ -204,11 +203,23 @@ way; scheduled and manual runs scan everything:
 - **sbom:** CycloneDX/syft SBOMs
 - **contract-audit:** `scripts/contract-audit.sh`
 
-### nightly.yml
+### scheduled.yml
 
-Daily 03:00 UTC: contracts property tests and fuzzing, API property tests, testnet deposit/withdraw journey. Weekly
-(Sunday 02:00 UTC) and on demand: staging load soak. A failed scheduled run opens or updates one `nightly-failure`
-tracking issue.
+Every 15 minutes: synthetic probes against staging. Daily 03:00 UTC: contracts property tests and fuzzing, API property
+tests, testnet deposit/withdraw journey. Weekly (Sunday 02:00 UTC): staging load soak. Each cron runs only its own jobs;
+a manual run picks one with the `task` input (`nightly`, `soak` or `probes`). A failed nightly or soak run opens or
+updates one `nightly-failure` tracking issue; probe failures alert through the pushed metrics instead.
+
+### deploy.yml
+
+`workflow_dispatch` deploys to staging (build from source, deploy, readiness wait, smoke tests). Pushing a `v*.*.*` tag
+deploys to production: build and push the API and signer images, pin them by digest, run migrations and deploy behind
+the `production` environment approval, smoke-test, and roll back automatically if the smoke tests fail.
+
+### pr-policy.yml
+
+Checks on pull request metadata rather than code; today the `Contracts freeze` check. Separate from `ci.yml` because it
+reruns on every label or description edit.
 
 ## When a Gate Fails
 
@@ -234,7 +245,7 @@ If you add a new security tool:
 - [deploy/](../../deploy) — production security posture
 - `.github/workflows/security.yml` — full security job definitions
 - `.github/workflows/ci.yml` — build and test gates
-- `.github/workflows/nightly.yml` — scheduled property tests, fuzzing, E2E and soak
+- `.github/workflows/scheduled.yml` — probes, property tests, fuzzing, E2E and soak
 
 ## Verification: Testing Each Gate
 
